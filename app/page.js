@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { supabase, isConfigured } from "../lib/supabaseClient";
 import AuthScreen from "../components/AuthScreen";
 import Terminal from "../components/Terminal";
 export const dynamic = "force-dynamic";
