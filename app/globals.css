@@ -1,0 +1,23 @@
+:root {
+  --amber: #ffa028;
+  --amber-dim: #b36f1c;
+  --green: #2bd94f;
+  --red: #ff3b3b;
+  --cyan: #4fd8eb;
+  --white: #e8e4db;
+  --bg: #000;
+  --panel: #0a0a08;
+  --border: #2e2415;
+  --mono: "IBM Plex Mono", "Consolas", "Menlo", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--white); font-family: var(--mono); }
+input, button { font-family: var(--mono); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border); }
+::-webkit-scrollbar-track { background: #050400; }
+a { color: var(--cyan); text-decoration: none; }
+a:hover { text-decoration: underline; }
+@keyframes blink { 0%,49% {opacity:1} 50%,100% {opacity:.2} }
+.blink { animation: blink 1.2s infinite; }
+button:focus-visible, input:focus-visible { outline: 1px solid var(--amber); }
