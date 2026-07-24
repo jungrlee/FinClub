@@ -2,9 +2,9 @@
 // Lightweight endpoint used by the realtime poller. Returns only what the
 // watchlist rail and P&L need, so it stays fast enough to hit every 15s.
 import { NextResponse } from "next/server";
-import yahooFinance from "yahoo-finance2";
+import yahooFinance from "../../../lib/yahoo";
 
-yahooFinance.suppressNotices(["yahooSurvey"]);
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const cache = new Map();
@@ -44,7 +44,10 @@ export async function GET(req) {
     cache.set(key, { t: Date.now(), d: payload });
     return NextResponse.json(payload);
   } catch (e) {
-    console.error("batch quote error:", e.message);
-    return NextResponse.json({ quotes: {}, error: "batch failed" }, { status: 502 });
+    console.error("batch quote error:", e);
+    return NextResponse.json(
+      { quotes: {}, error: "batch failed", detail: e?.message ?? String(e) },
+      { status: 502 }
+    );
   }
 }

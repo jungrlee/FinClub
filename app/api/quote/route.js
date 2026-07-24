@@ -1,10 +1,9 @@
 // GET /api/quote?q=AAPL&market=US   or   ?q=005930&market=KR   or ?q=삼성전자&market=KR
 // Real market data via Yahoo Finance (free, no API key). Korean stocks use .KS/.KQ suffixes.
 import { NextResponse } from "next/server";
-import yahooFinance from "yahoo-finance2";
+import yahooFinance from "../../../lib/yahoo";
 
-yahooFinance.suppressNotices(["yahooSurvey"]);
-
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // simple in-memory cache (per serverless instance) to be kind to Yahoo
@@ -13,6 +12,8 @@ const TTL = 60 * 1000;
 
 async function resolveSymbol(q, market) {
   const raw = q.trim();
+  const errors = [];
+
   if (market === "KR") {
     if (/^\d{6}$/.test(raw)) {
       // KOSPI first, then KOSDAQ
@@ -20,28 +21,46 @@ async function resolveSymbol(q, market) {
         try {
           const r = await yahooFinance.quote(raw + suf);
           if (r && r.regularMarketPrice != null) return raw + suf;
-        } catch (_) {}
+        } catch (e) {
+          errors.push(`${raw}${suf}: ${e.message}`);
+        }
       }
     }
-    const s = await yahooFinance.search(raw, { quotesCount: 6, newsCount: 0 });
-    const hit = (s.quotes || []).find(
-      (x) => x.symbol && (x.symbol.endsWith(".KS") || x.symbol.endsWith(".KQ"))
+    try {
+      const s = await yahooFinance.search(raw, { quotesCount: 6, newsCount: 0 });
+      const hit = (s.quotes || []).find(
+        (x) => x.symbol && (x.symbol.endsWith(".KS") || x.symbol.endsWith(".KQ"))
+      );
+      if (hit) return hit.symbol;
+    } catch (e) {
+      errors.push(`search: ${e.message}`);
+    }
+    throw new Error(
+      `Korean symbol not found. ${errors.length ? "Upstream: " + errors.join(" | ") : ""}`
     );
-    if (hit) return hit.symbol;
-    throw new Error("Korean symbol not found");
   }
+
   // US
   const sym = raw.toUpperCase();
   try {
     const r = await yahooFinance.quote(sym);
     if (r && r.regularMarketPrice != null) return sym;
-  } catch (_) {}
-  const s = await yahooFinance.search(raw, { quotesCount: 6, newsCount: 0 });
-  const hit = (s.quotes || []).find(
-    (x) => x.symbol && !x.symbol.includes(".") && x.quoteType === "EQUITY"
+    errors.push(`${sym}: no price in response`);
+  } catch (e) {
+    errors.push(`${sym}: ${e.message}`);
+  }
+  try {
+    const s = await yahooFinance.search(raw, { quotesCount: 6, newsCount: 0 });
+    const hit = (s.quotes || []).find(
+      (x) => x.symbol && !x.symbol.includes(".") && x.quoteType === "EQUITY"
+    );
+    if (hit) return hit.symbol;
+  } catch (e) {
+    errors.push(`search: ${e.message}`);
+  }
+  throw new Error(
+    `US symbol not found. ${errors.length ? "Upstream: " + errors.join(" | ") : ""}`
   );
-  if (hit) return hit.symbol;
-  throw new Error("US symbol not found");
 }
 
 function num(v) {
@@ -61,8 +80,11 @@ export async function GET(req) {
   try {
     const symbol = await resolveSymbol(q, market);
 
-    const [quote, summary, chart, news] = await Promise.all([
-      yahooFinance.quote(symbol),
+    // quote is required; everything else is best-effort so one bad module
+    // (Yahoo often 404s quoteSummary for foreign listings) can't kill the row.
+    const quote = await yahooFinance.quote(symbol);
+
+    const [summary, chart, news] = await Promise.all([
       yahooFinance
         .quoteSummary(symbol, {
           modules: [
@@ -74,11 +96,19 @@ export async function GET(req) {
             "earningsTrend",
           ],
         })
-        .catch(() => ({})),
-      yahooFinance.chart(symbol, {
-        period1: new Date(Date.now() - 1000 * 60 * 60 * 24 * 100),
-        interval: "1d",
-      }),
+        .catch((e) => {
+          console.warn(`quoteSummary failed for ${symbol}:`, e.message);
+          return {};
+        }),
+      yahooFinance
+        .chart(symbol, {
+          period1: new Date(Date.now() - 1000 * 60 * 60 * 24 * 100),
+          interval: "1d",
+        })
+        .catch((e) => {
+          console.warn(`chart failed for ${symbol}:`, e.message);
+          return { quotes: [] };
+        }),
       yahooFinance
         .search(symbol.replace(/\.(KS|KQ)$/, ""), { quotesCount: 0, newsCount: 6 })
         .catch(() => ({ news: [] })),
@@ -158,9 +188,14 @@ export async function GET(req) {
     cache.set(ck, { t: Date.now(), d: data });
     return NextResponse.json(data);
   } catch (e) {
-    console.error("quote error:", e.message);
+    // Log the full error server-side, and send the message to the client so
+    // the UI can show something actionable instead of a generic failure.
+    console.error(`quote error for "${q}" (${market}):`, e);
     return NextResponse.json(
-      { error: `Could not resolve "${q}" (${market}). Try a ticker like AAPL or 005930.` },
+      {
+        error: `Could not resolve "${q}" (${market}).`,
+        detail: e?.message ?? String(e),
+      },
       { status: 404 }
     );
   }

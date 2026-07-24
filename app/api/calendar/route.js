@@ -2,9 +2,9 @@
 // Aggregates upcoming earnings dates + consensus for every symbol in the
 // watchlist so the Calendar tab can show one sorted timeline.
 import { NextResponse } from "next/server";
-import yahooFinance from "yahoo-finance2";
+import yahooFinance from "../../../lib/yahoo";
 
-yahooFinance.suppressNotices(["yahooSurvey"]);
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const cache = new Map();
@@ -14,12 +14,16 @@ const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
 
 async function one(symbol) {
   try {
-    const [q, s] = await Promise.all([
-      yahooFinance.quote(symbol),
-      yahooFinance
-        .quoteSummary(symbol, { modules: ["calendarEvents", "earningsTrend", "earningsHistory"] })
-        .catch(() => ({})),
-    ]);
+    const q = await yahooFinance.quote(symbol);
+    const s = await yahooFinance
+      .quoteSummary(symbol, {
+        modules: ["calendarEvents", "earningsTrend", "earningsHistory"],
+      })
+      .catch((e) => {
+        console.warn(`calendar quoteSummary failed for ${symbol}:`, e.message);
+        return {};
+      });
+
     const cal = s.calendarEvents || {};
     const dates = cal.earnings?.earningsDate || [];
     const trend = (s.earningsTrend?.trend || []).find((t) => t.period === "0q") || {};
@@ -51,6 +55,7 @@ async function one(symbol) {
       })),
     };
   } catch (e) {
+    console.warn(`calendar failed for ${symbol}:`, e.message);
     return { symbol, error: true };
   }
 }
