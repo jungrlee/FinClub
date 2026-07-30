@@ -1,4 +1,5 @@
 "use client";
+import { useState, useEffect, useCallback } from "react";
 import {
   ComposedChart, Line, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceLine, CartesianGrid,
@@ -6,7 +7,98 @@ import {
 import { C, Label, Val, btn, Panel, ProbBar } from "./ui";
 import { px, bigNum, pctStr, ago } from "../lib/format";
 
+const RANGES = ["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y"];
+
+function FinancialTable({ periods, cur, rows }) {
+  if (!periods || periods.length === 0) return null;
+  const sorted = [...periods].sort((a, b) => new Date(b.period) - new Date(a.period)).slice(0, 6);
+  return (
+    <div style={{ overflowX: "auto", marginBottom: 14 }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+        <thead>
+          <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+            <th style={{ textAlign: "left", padding: "3px 6px" }}></th>
+            {sorted.map((p) => (
+              <th key={p.period} style={{ textAlign: "right", color: C.amber, fontSize: 10, padding: "3px 6px", whiteSpace: "nowrap", fontWeight: 400 }}>
+                {p.period}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([key, label, isPerShare]) => (
+            <tr key={key} style={{ borderBottom: "1px solid #100C06" }}>
+              <td style={{ textAlign: "left", color: C.white, fontSize: 11, padding: "4px 6px", whiteSpace: "nowrap" }}>{label}</td>
+              {sorted.map((p) => {
+                const v = p[key];
+                const ok = typeof v === "number";
+                return (
+                  <td key={p.period} style={{ textAlign: "right", padding: "4px 6px", color: ok && v < 0 ? C.red : C.white, whiteSpace: "nowrap" }}>
+                    {!ok ? "—" : isPerShare ? v.toFixed(2) : bigNum(v, cur)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function StockDetail({ data, live, pred, predErr, loading, onRefresh, t, lang }) {
+  const [subTab, setSubTab] = useState("overview");
+  const [range, setRange] = useState("6M");
+  const [chartCloses, setChartCloses] = useState([]);
+  const [chartLoading, setChartLoading] = useState(false);
+  const [financials, setFinancials] = useState(null);
+  const [finLoading, setFinLoading] = useState(false);
+  const [finErr, setFinErr] = useState(null);
+  const [finPeriod, setFinPeriod] = useState("annual");
+
+  // Reset per-symbol state whenever a different stock is selected.
+  useEffect(() => {
+    setSubTab("overview");
+    setRange("6M");
+    setChartCloses(data?.closes || []);
+    setFinancials(null);
+    setFinErr(null);
+  }, [data?.symbol]);
+
+  const loadChart = useCallback(async (r) => {
+    if (!data?.symbol) return;
+    setChartLoading(true);
+    try {
+      const res = await fetch(`/api/chart?q=${encodeURIComponent(data.symbol)}&market=${data.market}&range=${r}`);
+      const d = await res.json();
+      setChartCloses(d.closes || []);
+    } catch (_) {
+      // keep whatever chart was already showing
+    }
+    setChartLoading(false);
+  }, [data?.symbol, data?.market]);
+
+  useEffect(() => {
+    if (data?.symbol) loadChart(range);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, data?.symbol]);
+
+  const loadFinancials = useCallback(async () => {
+    if (!data?.symbol || financials) return;
+    setFinLoading(true); setFinErr(null);
+    try {
+      const res = await fetch(`/api/financials?q=${encodeURIComponent(data.symbol)}&market=${data.market}`);
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || "failed to load financials");
+      setFinancials(d);
+    } catch (e) {
+      setFinErr(String(e.message || e));
+    }
+    setFinLoading(false);
+  }, [data?.symbol, data?.market, financials]);
+
+  const openFinancials = () => { setSubTab("financials"); loadFinancials(); };
+
   if (loading && !data)
     return <div style={{ padding: 24, color: C.amber }}><span className="blink">█</span> {loading}</div>;
   if (!data)
@@ -25,9 +117,12 @@ export default function StockDetail({ data, live, pred, predErr, loading, onRefr
   const pxColor = up ? C.green : C.red;
   const cur = data.currency;
   const locale = lang === "ko" ? "ko-KR" : "en-US";
+  const isIntraday = range === "1D" || range === "5D";
 
-  const chart = (data.closes || []).map((c) => ({
-    d: new Date(c.d).toLocaleDateString(locale, { month: "short", day: "numeric" }),
+  const chart = chartCloses.map((c) => ({
+    d: isIntraday
+      ? new Date(c.d).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
+      : new Date(c.d).toLocaleDateString(locale, { month: "short", day: "numeric" }),
     px: c.c,
   }));
   const range52 =
@@ -35,8 +130,18 @@ export default function StockDetail({ data, live, pred, predErr, loading, onRefr
       ? ((price - data.week52Low) / (data.week52High - data.week52Low)) * 100
       : null;
 
+  const incRows = financials?.incomeStatement?.[finPeriod] || [];
+  const balRows = financials?.balanceSheet?.[finPeriod] || [];
+  const cfRows = financials?.cashFlow?.[finPeriod] || [];
+  const noFinancials = financials && incRows.length === 0 && balRows.length === 0 && cfRows.length === 0;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
+      <div style={{ display: "flex", gap: 2, padding: "6px 12px 0" }}>
+        <button onClick={() => setSubTab("overview")} style={{ ...btn(subTab === "overview"), padding: "3px 12px", fontSize: 10 }}>{t("overview")}</button>
+        <button onClick={openFinancials} style={{ ...btn(subTab === "financials"), padding: "3px 12px", fontSize: 10 }}>{t("financials")}</button>
+      </div>
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, padding: "8px 12px", borderBottom: `1px solid ${C.border}`, alignItems: "baseline" }}>
         <span style={{ color: C.amber, fontSize: 14, fontWeight: 700 }}>
           {data.symbol} <span style={{ color: C.white, fontWeight: 400 }}>{data.name}</span>
@@ -59,8 +164,17 @@ export default function StockDetail({ data, live, pred, predErr, loading, onRefr
         <button onClick={onRefresh} style={{ ...btn(false), padding: "2px 10px", marginLeft: "auto" }}>{t("refresh")}</button>
       </div>
 
+      {subTab === "overview" && (
       <div style={{ flex: 1, display: "grid", gap: 6, padding: 6, minHeight: 0, gridTemplateColumns: "repeat(auto-fit, minmax(min(310px, 100%), 1fr))", overflow: "auto", alignContent: "start" }}>
-        <Panel title={t("pnlChart")} style={{ gridColumn: "1 / -1", minHeight: 240 }}>
+        <Panel title={t("pnlChart")} style={{ gridColumn: "1 / -1", minHeight: 240 }}
+          right={
+            <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+              {chartLoading && <span style={{ color: C.dim, fontSize: 9 }}>···</span>}
+              {RANGES.map((r) => (
+                <button key={r} onClick={() => setRange(r)} style={{ ...btn(range === r), padding: "2px 7px", fontSize: 9 }}>{r}</button>
+              ))}
+            </div>
+          }>
           <ResponsiveContainer width="100%" height={210}>
             <ComposedChart data={chart}>
               <CartesianGrid stroke="#181206" vertical={false} />
@@ -202,6 +316,46 @@ export default function StockDetail({ data, live, pred, predErr, loading, onRefr
           ))}
         </Panel>
       </div>
+      )}
+
+      {subTab === "financials" && (
+        <div style={{ flex: 1, padding: 6, overflow: "auto" }}>
+          <Panel title={t("financials")} right={
+            <div style={{ display: "flex", gap: 4 }}>
+              <button onClick={() => setFinPeriod("annual")} style={{ ...btn(finPeriod === "annual"), padding: "2px 8px", fontSize: 10 }}>{t("annual")}</button>
+              <button onClick={() => setFinPeriod("quarterly")} style={{ ...btn(finPeriod === "quarterly"), padding: "2px 8px", fontSize: 10 }}>{t("quarterly")}</button>
+            </div>
+          }>
+            {finLoading && <Val color={C.dim} size={11}><span className="blink">█</span> {t("loadingFinancials")}</Val>}
+            {finErr && <Val color={C.red} size={11}>{finErr}</Val>}
+            {!finLoading && !finErr && noFinancials && (
+              <Val color={C.dim} size={11}>{t("noFinancials")}</Val>
+            )}
+            {!finLoading && !noFinancials && financials && (
+              <>
+                <Label>{t("incomeStatementTitle")}</Label>
+                <FinancialTable cur={cur} periods={incRows} rows={[
+                  ["revenue", t("revenue")], ["costOfRevenue", t("costOfRevenue")], ["grossProfit", t("grossProfit")],
+                  ["operatingExpense", t("opExpense")], ["operatingIncome", t("opIncome")], ["pretaxIncome", t("pretaxIncome")],
+                  ["incomeTax", t("incomeTax")], ["netIncome", t("netIncome")], ["eps", t("epsTTM"), true], ["ebitda", "EBITDA"],
+                ]} />
+                <Label>{t("balanceSheetTitle")}</Label>
+                <FinancialTable cur={cur} periods={balRows} rows={[
+                  ["cash", t("cashAndEq")], ["totalCurrentAssets", t("totalCurAssets")], ["totalNonCurrentAssets", t("totalNonCurAssets")],
+                  ["totalAssets", t("totalAssets")], ["totalCurrentLiabilities", t("totalCurLiab")], ["totalNonCurrentLiabilities", t("totalNonCurLiab")],
+                  ["totalLiabilities", t("totalLiab")], ["totalEquity", t("totalEquity")],
+                ]} />
+                <Label>{t("cashFlowTitle")}</Label>
+                <FinancialTable cur={cur} periods={cfRows} rows={[
+                  ["operatingCashFlow", t("opCashFlow")], ["capex", t("capex")], ["freeCashFlow", t("freeCashFlowLabel")],
+                  ["investingCashFlow", t("investCashFlow")], ["financingCashFlow", t("financeCashFlow")],
+                  ["dividendsPaid", t("dividendsPaid")], ["stockRepurchase", t("stockRepurchase")],
+                ]} />
+              </>
+            )}
+          </Panel>
+        </div>
+      )}
     </div>
   );
 }
