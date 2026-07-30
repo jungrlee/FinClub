@@ -3,15 +3,15 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { C, Label, Val, btn, inputS, Panel } from "./ui";
 import { px, signed, bigNum, daysUntil } from "../lib/format";
+import TickerInput from "./TickerInput";
 
 export default function Competition({ user, session, t, liveQuotes, onSymbolsChange }) {
-  const token = session?.access_token;
-
   const [loading, setLoading] = useState(true);
   const [competition, setCompetition] = useState(null);
   const [participant, setParticipant] = useState(null);
   const [rows, setRows] = useState([]); // my competition_positions
   const [ranked, setRanked] = useState([]);
+  const [leaderboardErr, setLeaderboardErr] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [err, setErr] = useState(null);
 
@@ -24,14 +24,17 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   const [busy, setBusy] = useState(false);
   const [orderMsg, setOrderMsg] = useState(null);
 
-  const authFetch = useCallback(
-    (url, opts = {}) =>
-      fetch(url, {
-        ...opts,
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
-      }),
-    [token]
-  );
+  // Reads the session fresh at request time rather than closing over the
+  // `session` prop — the shared supabase client auto-refreshes its token
+  // internally, so a long-open tab never silently 401s on a stale token.
+  const authFetch = useCallback(async (url, opts = {}) => {
+    const { data: { session: fresh } } = await supabase.auth.getSession();
+    const token = fresh?.access_token || session?.access_token;
+    return fetch(url, {
+      ...opts,
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(opts.headers || {}) },
+    });
+  }, [session]);
 
   const loadCompetition = useCallback(async () => {
     setLoading(true);
@@ -52,7 +55,8 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   // ---- my holdings ----
   const loadHoldings = useCallback(async () => {
     if (!participant) return;
-    const { data } = await supabase.from("competition_positions").select("*").eq("participant_id", participant.id);
+    const { data, error } = await supabase.from("competition_positions").select("*").eq("participant_id", participant.id);
+    if (error) { console.warn(`[competition] holdings load failed: ${error.message}`); return; }
     setRows(data || []);
   }, [participant]);
 
@@ -65,11 +69,15 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   // ---- leaderboard ----
   const loadLeaderboard = useCallback(async () => {
     if (!competition) return;
+    setLeaderboardErr(null);
     try {
       const r = await authFetch(`/api/competition/leaderboard?competitionId=${competition.id}`);
       const d = await r.json();
-      if (r.ok) setRanked(d.ranked || []);
-    } catch (_) {}
+      if (!r.ok) throw new Error(d.error || "failed to load leaderboard");
+      setRanked(d.ranked || []);
+    } catch (e) {
+      setLeaderboardErr(String(e.message || e));
+    }
   }, [authFetch, competition]);
 
   useEffect(() => { loadLeaderboard(); }, [loadLeaderboard]);
@@ -87,8 +95,8 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
     setBusy(false);
   };
 
-  const resolveSymbol = async () => {
-    const query = q.trim();
+  const resolveSymbol = async (override) => {
+    const query = (override ?? q).trim();
     if (!query) return;
     setOrderMsg(null);
     try {
@@ -198,9 +206,13 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
           </div>
           <div>
             <Label>{t("symbol")}</Label>
-            <input style={inputS} value={q} onChange={(e) => { setQ(e.target.value); setPreview(null); }}
-              onKeyDown={(e) => e.key === "Enter" && resolveSymbol()}
-              placeholder={market === "US" ? "AAPL" : "005930"} />
+            <TickerInput
+              value={q} market={market}
+              onChange={(v) => { setQ(v); setPreview(null); }}
+              onEnter={() => resolveSymbol()}
+              onSelect={(cand) => resolveSymbol(cand.symbol)}
+              placeholder={market === "US" ? "AAPL" : "005930"}
+            />
           </div>
           <div>
             <button style={btn(false)} onClick={resolveSymbol}>{t("refresh")}</button>
@@ -269,6 +281,11 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
       </Panel>
 
       <Panel title={t("leaderboard")} right={<button style={{ ...btn(false), padding: "2px 8px" }} onClick={loadLeaderboard}>{t("refresh")}</button>}>
+        {leaderboardErr && <div style={{ color: C.red, fontSize: 11, marginBottom: 8 }}>{leaderboardErr}</div>}
+        {!leaderboardErr && ranked.length === 0 && (
+          <Val color={C.dim} size={11}>{t("noParticipants")}</Val>
+        )}
+        {ranked.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
@@ -302,7 +319,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
                     {isOpen && (
                       <tr>
                         <td colSpan={5} style={{ padding: "6px 10px", background: "#0A0700" }}>
-                          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+                          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
                             <div>
                               <Label>{t("holdings")}</Label>
                               {r.holdings.length === 0 ? (
@@ -333,6 +350,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
             </tbody>
           </table>
         </div>
+        )}
       </Panel>
     </div>
   );

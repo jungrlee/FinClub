@@ -3,19 +3,23 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { useT } from "../lib/i18n";
 import { useRealtimeQuotes, px } from "../lib/format";
-import { C, Label, Val, btn, inputS } from "./ui";
+import { useIsMobile } from "../lib/useIsMobile";
+import { C, Label, Val, btn } from "./ui";
 import StockDetail from "./StockDetail";
 import Portfolio from "./Portfolio";
 import Calendar from "./Calendar";
 import Competition from "./Competition";
+import TickerInput from "./TickerInput";
 
 export default function Terminal({ session }) {
   const user = session.user;
+  const isMobile = useIsMobile();
   const [lang, setLang] = useState("en");
   const [realtime, setRealtime] = useState(true);
   const t = useT(lang);
 
   const [tab, setTab] = useState("terminal");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [watchlist, setWatchlist] = useState([]);
   const [portfolioSymbols, setPortfolioSymbols] = useState([]);
   const [competitionSymbols, setCompetitionSymbols] = useState([]);
@@ -114,7 +118,10 @@ export default function Terminal({ session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selectRow = (row) => { setSelected(row); setTab("terminal"); fetchStock(row, false); };
+  const selectRow = (row) => {
+    setSelected(row); setTab("terminal"); fetchStock(row, false);
+    if (isMobile) setSidebarOpen(false);
+  };
 
   const addStock = async () => {
     const q = query.trim();
@@ -168,41 +175,75 @@ export default function Terminal({ session }) {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       {/* header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", borderBottom: "2px solid var(--amber-dim)", background: "#0D0800", flexWrap: "wrap" }}>
-        <span style={{ color: C.amber, fontWeight: 700, fontSize: 13, letterSpacing: 2 }}>
-          🐋 WHALES<span style={{ color: C.white }}>MARKET</span>
-        </span>
-        <div style={{ display: "flex", gap: 2 }}>
-          {TABS.map((x) => (
-            <button key={x.id} onClick={() => setTab(x.id)}
-              style={{
-                ...btn(tab === x.id), padding: "4px 12px",
-                borderColor: tab === x.id ? "var(--amber)" : "transparent",
-              }}>
-              {x.label}
+      <div style={{ borderBottom: "2px solid var(--amber-dim)", background: "#0D0800" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", flexWrap: isMobile ? "nowrap" : "wrap" }}>
+          {isMobile && (
+            <button onClick={() => setSidebarOpen(true)} style={{ ...btn(false), padding: "4px 8px", fontSize: 14 }}>☰</button>
+          )}
+          <span style={{ color: C.amber, fontWeight: 700, fontSize: 13, letterSpacing: 2, whiteSpace: "nowrap" }}>
+            🐋 WHALES<span style={{ color: C.white }}>MARKET</span>
+          </span>
+          {!isMobile && (
+            <div style={{ display: "flex", gap: 2 }}>
+              {TABS.map((x) => (
+                <button key={x.id} onClick={() => setTab(x.id)}
+                  style={{
+                    ...btn(tab === x.id), padding: "4px 12px",
+                    borderColor: tab === x.id ? "var(--amber)" : "transparent",
+                  }}>
+                  {x.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {!isMobile && (
+            <span style={{ color: C.dim, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
+              {user.email}
+            </span>
+          )}
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            <button onClick={toggleRealtime} style={{ ...btn(false), padding: "2px 8px", color: realtime ? "var(--green)" : "var(--amber-dim)", borderColor: realtime ? "var(--green)" : "var(--amber-dim)" }}>
+              {realtime ? `● ${t("live")}` : `○ ${t("paused")}`}
             </button>
-          ))}
+            <button onClick={toggleLang} style={{ ...btn(false), padding: "2px 8px" }}>
+              {lang === "en" ? "🇰🇷" : "🇺🇸"}{!isMobile && (lang === "en" ? " 한국어" : " EN")}
+            </button>
+            {!isMobile && (
+              <span style={{ color: C.dim, fontSize: 11 }}>{clock.toLocaleTimeString(lang === "ko" ? "ko-KR" : "en-US", { hour12: false })}</span>
+            )}
+            <button style={{ ...btn(false), padding: "2px 10px" }} onClick={() => supabase.auth.signOut()}>{t("logout")}</button>
+          </div>
         </div>
-        <span style={{ color: C.dim, fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 160 }}>
-          {user.email}
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={toggleRealtime} style={{ ...btn(false), padding: "2px 8px", color: realtime ? "var(--green)" : "var(--amber-dim)", borderColor: realtime ? "var(--green)" : "var(--amber-dim)" }}>
-            {realtime ? `● ${t("live")}` : `○ ${t("paused")}`}
-          </button>
-          <button onClick={toggleLang} style={{ ...btn(false), padding: "2px 8px" }}>
-            {lang === "en" ? "🇰🇷 한국어" : "🇺🇸 EN"}
-          </button>
-          <span style={{ color: C.dim, fontSize: 11 }}>{clock.toLocaleTimeString(lang === "ko" ? "ko-KR" : "en-US", { hour12: false })}</span>
-          <button style={{ ...btn(false), padding: "2px 10px" }} onClick={() => supabase.auth.signOut()}>{t("logout")}</button>
-        </div>
+        {isMobile && (
+          <div style={{ display: "flex", gap: 2, overflowX: "auto", padding: "0 10px 6px", WebkitOverflowScrolling: "touch" }}>
+            {TABS.map((x) => (
+              <button key={x.id} onClick={() => setTab(x.id)}
+                style={{
+                  ...btn(tab === x.id), padding: "4px 12px", whiteSpace: "nowrap", flexShrink: 0,
+                  borderColor: tab === x.id ? "var(--amber)" : "transparent",
+                }}>
+                {x.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {err && <div style={{ padding: "3px 10px", color: C.red, fontSize: 11, borderBottom: `1px solid ${C.border}` }}>{err}</div>}
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+        {isMobile && sidebarOpen && (
+          <div onClick={() => setSidebarOpen(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 40 }} />
+        )}
         {/* sidebar */}
-        <div style={{ width: 235, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", background: "#050400" }}>
+        <div style={{
+          width: 235, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", background: "#050400",
+          ...(isMobile ? {
+            position: "fixed", top: 0, bottom: 0, left: 0, zIndex: 50, maxWidth: "82vw",
+            transform: sidebarOpen ? "translateX(0)" : "translateX(-100%)", transition: "transform .25s ease",
+          } : {}),
+        }}>
           <div style={{ padding: 8, borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
               {["US", "KR"].map((m) => (
@@ -211,10 +252,12 @@ export default function Terminal({ session }) {
                 </button>
               ))}
             </div>
-            <input style={inputS}
+            <TickerInput
+              value={query} onChange={setQuery} market={market}
               placeholder={market === "US" ? t("searchUS") : t("searchKR")}
-              value={query} onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addStock()} />
+              onEnter={addStock}
+              onSelect={(cand) => setQuery(cand.symbol)}
+            />
             <button style={{ ...btn(true), width: "100%", marginTop: 6 }} onClick={addStock}>{t("addBtn")}</button>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>

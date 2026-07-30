@@ -59,7 +59,7 @@ export default function StockDetail({ data, live, pred, predErr, loading, onRefr
         <button onClick={onRefresh} style={{ ...btn(false), padding: "2px 10px", marginLeft: "auto" }}>{t("refresh")}</button>
       </div>
 
-      <div style={{ flex: 1, display: "grid", gap: 6, padding: 6, minHeight: 0, gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", overflow: "auto", alignContent: "start" }}>
+      <div style={{ flex: 1, display: "grid", gap: 6, padding: 6, minHeight: 0, gridTemplateColumns: "repeat(auto-fit, minmax(min(310px, 100%), 1fr))", overflow: "auto", alignContent: "start" }}>
         <Panel title={t("pnlChart")} style={{ gridColumn: "1 / -1", minHeight: 240 }}>
           <ResponsiveContainer width="100%" height={210}>
             <ComposedChart data={chart}>
