@@ -7,6 +7,7 @@ import { C, Label, Val, btn, inputS } from "./ui";
 import StockDetail from "./StockDetail";
 import Portfolio from "./Portfolio";
 import Calendar from "./Calendar";
+import Competition from "./Competition";
 
 export default function Terminal({ session }) {
   const user = session.user;
@@ -17,6 +18,7 @@ export default function Terminal({ session }) {
   const [tab, setTab] = useState("terminal");
   const [watchlist, setWatchlist] = useState([]);
   const [portfolioSymbols, setPortfolioSymbols] = useState([]);
+  const [competitionSymbols, setCompetitionSymbols] = useState([]);
   const [selected, setSelected] = useState(null);
   const [query, setQuery] = useState("");
   const [market, setMarket] = useState("US");
@@ -58,8 +60,9 @@ export default function Terminal({ session }) {
     const s = new Set();
     watchlist.forEach((w) => w.symbol && s.add(w.symbol));
     portfolioSymbols.forEach((x) => x && s.add(x));
+    competitionSymbols.forEach((x) => x && s.add(x));
     return [...s];
-  }, [watchlist, portfolioSymbols]);
+  }, [watchlist, portfolioSymbols, competitionSymbols]);
 
   const { quotes: liveQuotes, lastTick, flash } = useRealtimeQuotes(allSymbols, realtime);
 
@@ -159,6 +162,7 @@ export default function Terminal({ session }) {
     { id: "terminal", label: t("tabTerminal") },
     { id: "portfolio", label: t("tabPortfolio") },
     { id: "calendar", label: t("tabCalendar") },
+    { id: "competition", label: t("tabCompetition") },
   ];
 
   return (
@@ -262,6 +266,9 @@ export default function Terminal({ session }) {
         )}
         {tab === "calendar" && (
           <Calendar symbols={watchlist.map((w) => w.symbol).filter(Boolean)} t={t} lang={lang} />
+        )}
+        {tab === "competition" && (
+          <Competition user={user} session={session} t={t} liveQuotes={liveQuotes} onSymbolsChange={setCompetitionSymbols} />
         )}
       </div>
 
