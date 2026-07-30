@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { requireAdmin } from "../lib/requireAdmin";
-import { supabaseAdmin } from "../lib/supabaseAdmin";
+import { requireAdmin } from "../../lib/requireAdmin";
+import { supabaseAdmin } from "../../lib/adminSupabase";
 
 export async function createCompetition(formData) {
   await requireAdmin(); // re-checked here, not just at the page level
@@ -21,7 +21,7 @@ export async function createCompetition(formData) {
     .insert({ name, starting_cash, start_date, end_date, allow_short });
   if (error) throw new Error(error.message);
 
-  revalidatePath("/");
+  revalidatePath("/admin");
 }
 
 export async function adjustCash(formData) {
@@ -40,5 +40,5 @@ export async function adjustCash(formData) {
   });
   if (error) throw new Error(error.message);
 
-  revalidatePath(`/competitions/${competitionId}`);
+  revalidatePath(`/admin/competitions/${competitionId}`);
 }

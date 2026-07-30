@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { requireAdmin } from "../lib/requireAdmin";
-import { supabaseAdmin } from "../lib/supabaseAdmin";
+import { requireAdmin } from "../../lib/requireAdmin";
+import { supabaseAdmin } from "../../lib/adminSupabase";
 import { createCompetition } from "./actions";
 
 const panel = { background: "var(--panel)", border: "1px solid var(--border)", marginBottom: 16 };

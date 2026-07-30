@@ -1,7 +1,7 @@
 "use client";
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabaseBrowserClient } from "../../lib/supabaseBrowser";
+import { adminSupabaseBrowserClient } from "../../../lib/adminSupabaseBrowser";
 
 const inputS = {
   background: "#0D0800", border: "1px solid var(--border)", outline: "none",
@@ -33,7 +33,7 @@ function LoginForm() {
 
   const signIn = async () => {
     setBusy(true); setErr(null);
-    const supabase = supabaseBrowserClient();
+    const supabase = adminSupabaseBrowserClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);
     if (error) { setErr(error.message); return; }

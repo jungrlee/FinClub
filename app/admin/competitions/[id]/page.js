@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { requireAdmin } from "../../../lib/requireAdmin";
-import { supabaseAdmin } from "../../../lib/supabaseAdmin";
-import { supabaseServerClient } from "../../../lib/supabaseServerClient";
+import { requireAdmin } from "../../../../lib/requireAdmin";
+import { supabaseAdmin } from "../../../../lib/adminSupabase";
+import { adminSupabaseServerClient } from "../../../../lib/adminSupabaseServerClient";
+import { computeLeaderboard } from "../../../../lib/competitionLeaderboard";
 import { adjustCash } from "../../actions";
 
 const panel = { background: "var(--panel)", border: "1px solid var(--border)", marginBottom: 16 };
@@ -11,20 +12,11 @@ const inputS = { background: "#0D0800", border: "1px solid var(--border)", outli
 const btn = { background: "var(--amber)", color: "#000", border: "1px solid var(--amber)", fontSize: 11, letterSpacing: 1, padding: "6px 10px", cursor: "pointer" };
 
 async function fetchLeaderboard(competitionId) {
-  const supabase = supabaseServerClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return [];
-
-  const base = process.env.MEMBER_APP_URL;
+  const supabase = adminSupabaseServerClient();
   try {
-    const r = await fetch(`${base}/api/competition/leaderboard?competitionId=${competitionId}`, {
-      headers: { Authorization: `Bearer ${session.access_token}` },
-      cache: "no-store",
-    });
-    if (!r.ok) return [];
-    const d = await r.json();
-    return d.ranked || [];
-  } catch {
+    return await computeLeaderboard(supabase, competitionId);
+  } catch (e) {
+    console.warn(`[admin] leaderboard fetch failed: ${e.message}`);
     return [];
   }
 }
@@ -48,7 +40,7 @@ export default async function CompetitionDetailPage({ params }) {
       <div style={panel}>
         <div style={panelHead}>LEADERBOARD ({ranked.length} participants)</div>
         <div style={{ ...panelBody, overflowX: "auto" }}>
-          {ranked.length === 0 && <div style={{ color: "var(--amber-dim)", fontSize: 11 }}>No participants yet, or the member app couldn't be reached.</div>}
+          {ranked.length === 0 && <div style={{ color: "var(--amber-dim)", fontSize: 11 }}>No participants yet.</div>}
           {ranked.length > 0 && (
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
               <thead>
