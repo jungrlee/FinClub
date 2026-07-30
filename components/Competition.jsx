@@ -36,8 +36,8 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
     });
   }, [session]);
 
-  const loadCompetition = useCallback(async () => {
-    setLoading(true);
+  const loadCompetition = useCallback(async (silent) => {
+    if (!silent) setLoading(true);
     try {
       const r = await authFetch("/api/competition");
       const d = await r.json();
@@ -45,9 +45,9 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
       setCompetition(d.competition);
       setParticipant(d.participant);
     } catch (e) {
-      setErr(String(e.message || e));
+      if (!silent) setErr(String(e.message || e));
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [authFetch]);
 
   useEffect(() => { loadCompetition(); }, [loadCompetition]);
@@ -81,6 +81,24 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   }, [authFetch, competition]);
 
   useEffect(() => { loadLeaderboard(); }, [loadLeaderboard]);
+
+  // Live refresh — without this, another member joining/trading, or just
+  // prices moving, never shows up until a manual reload. Pauses while the
+  // tab is hidden, same idea as lib/format.js's useRealtimeQuotes.
+  useEffect(() => {
+    if (!competition) return;
+    const poll = () => { loadCompetition(true); loadHoldings(); loadLeaderboard(); };
+    let id = setInterval(poll, 15000);
+    const onVis = () => {
+      clearInterval(id);
+      if (!document.hidden) id = setInterval(poll, 15000);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [competition, loadCompetition, loadHoldings, loadLeaderboard]);
 
   const join = async () => {
     setBusy(true); setErr(null);
@@ -122,7 +140,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
       if (!r.ok) throw new Error(d.error || t("orderErr"));
       setOrderMsg({ ok: true, text: `${t("orderOk")} ${side.toUpperCase()} ${qty} ${preview.symbol} @ ${px(d.price, preview.currency)}` });
       setQty("");
-      await Promise.all([loadCompetition(), loadHoldings(), loadLeaderboard()]);
+      await Promise.all([loadCompetition(true), loadHoldings(), loadLeaderboard()]);
     } catch (e) {
       setOrderMsg({ ok: false, text: String(e.message || e) });
     }

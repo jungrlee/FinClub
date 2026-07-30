@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { supabase } from "../lib/supabaseClient";
 import { C, Label, Val, btn, inputS, Panel } from "./ui";
 import { px, pctStr, signed, bigNum } from "../lib/format";
@@ -10,6 +11,9 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
   const [form, setForm] = useState({ q: "", market: "US", shares: "", cost: "", date: "" });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [riskByCurrency, setRiskByCurrency] = useState({});
+  const [riskLoading, setRiskLoading] = useState({});
+  const [riskErr, setRiskErr] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -85,6 +89,39 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
     return Object.values(g);
   }, [rows, liveQuotes]);
 
+  // Stable value (not reference) that only changes when symbols/shares
+  // actually change — used to avoid re-fetching risk analytics on every
+  // price tick, since `groups` gets a new object reference each time.
+  const posSignature = useMemo(
+    () => groups.map((g) => `${g.cur}:${g.items.map((it) => `${it.symbol}:${it.shares}`).sort().join(",")}`).join("|"),
+    [groups]
+  );
+
+  useEffect(() => {
+    groups.forEach((g) => {
+      if (g.items.length === 0) return;
+      setRiskLoading((x) => ({ ...x, [g.cur]: true }));
+      setRiskErr((x) => ({ ...x, [g.cur]: null }));
+      fetch("/api/portfolio/risk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          positions: g.items.map((it) => ({ symbol: it.symbol, market: it.market, shares: it.shares, weight: it.weight || 0 })),
+          portfolioValue: g.value,
+          currency: g.cur,
+        }),
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.error) throw new Error(d.error);
+          setRiskByCurrency((x) => ({ ...x, [g.cur]: d }));
+        })
+        .catch((e) => setRiskErr((x) => ({ ...x, [g.cur]: String(e.message || e) })))
+        .finally(() => setRiskLoading((x) => ({ ...x, [g.cur]: false })));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posSignature]);
+
   const th = { color: C.dim, fontSize: 9, letterSpacing: 1, textAlign: "right", padding: "3px 6px", fontWeight: 400, whiteSpace: "nowrap" };
   const td = { fontSize: 11, textAlign: "right", padding: "5px 6px", whiteSpace: "nowrap" };
 
@@ -95,8 +132,12 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
         const pnlPct = g.cost > 0 ? (pnl / g.cost) * 100 : 0;
         const pc = pnl >= 0 ? C.green : C.red;
         const dc = g.day >= 0 ? C.green : C.red;
+        const risk = riskByCurrency[g.cur];
+        const rLoading = riskLoading[g.cur];
+        const rErr = riskErr[g.cur];
         return (
-          <Panel key={g.cur} title={`${t("portfolioTitle")} · ${g.cur}`}>
+        <Fragment key={g.cur}>
+          <Panel title={`${t("portfolioTitle")} · ${g.cur}`}>
             {/* summary strip */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 20, padding: "2px 2px 10px", borderBottom: `1px solid ${C.border}`, marginBottom: 6 }}>
               <div>
@@ -170,6 +211,89 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
               </table>
             </div>
           </Panel>
+
+          <Panel title={`${t("riskTitle")} · ${g.cur}`}>
+            {rLoading && !risk && <Val color={C.dim} size={11}><span className="blink">█</span> {t("loadingRisk")}</Val>}
+            {rErr && <Val color={C.red} size={11}>{rErr}</Val>}
+            {risk?.insufficientHistory && <Val color={C.dim} size={11}>{t("insufficientHistory")}</Val>}
+            {risk && !risk.insufficientHistory && (
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 20, marginBottom: 12 }}>
+                  <div>
+                    <Label>{t("volatility")}</Label><br />
+                    <Val size={16}>{typeof risk.portfolio.volatility === "number" ? `${(risk.portfolio.volatility * 100).toFixed(1)}%` : "—"}</Val>
+                  </div>
+                  <div>
+                    <Label>{t("betaLabel")} ({risk.benchmark})</Label><br />
+                    <Val size={16}>{typeof risk.portfolio.beta === "number" ? risk.portfolio.beta.toFixed(2) : "—"}</Val>
+                  </div>
+                  <div>
+                    <Label>{t("sharpeLabel")}</Label><br />
+                    <Val size={16} color={(risk.portfolio.sharpe ?? 0) >= 0 ? C.green : C.red}>
+                      {typeof risk.portfolio.sharpe === "number" ? risk.portfolio.sharpe.toFixed(2) : "—"}
+                    </Val>
+                  </div>
+                  <div>
+                    <Label>{t("varLabel")}</Label><br />
+                    <Val size={16} color={C.red}>{typeof risk.portfolio.var95_1d === "number" ? px(risk.portfolio.var95_1d, g.cur) : "—"}</Val>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 14 }}>
+                  <ResponsiveContainer width="100%" height={140}>
+                    <LineChart data={risk.portfolio.equityCurve}>
+                      <CartesianGrid stroke="#181206" vertical={false} />
+                      <XAxis dataKey="d" tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }} minTickGap={50} />
+                      <YAxis domain={["auto", "auto"]} tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }}
+                        width={60} tickFormatter={(v) => v.toLocaleString()} />
+                      <Tooltip
+                        contentStyle={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 11 }}
+                        labelStyle={{ color: C.dim }} itemStyle={{ color: C.amber }}
+                        formatter={(v) => [px(v, g.cur), "Value"]} />
+                      <Line type="monotone" dataKey="v" stroke={C.amber} dot={false} strokeWidth={1.6} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <Label>{t("correlationMatrix")}</Label>
+                <div style={{ overflowX: "auto", marginTop: 4 }}>
+                  <table style={{ borderCollapse: "collapse", fontSize: 10 }}>
+                    <thead>
+                      <tr>
+                        <th></th>
+                        {g.items.map((it) => (
+                          <th key={it.symbol} style={{ padding: "3px 6px", color: C.dim, fontWeight: 400 }}>
+                            {it.symbol.replace(/\.(KS|KQ)$/, "")}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {g.items.map((row) => (
+                        <tr key={row.symbol}>
+                          <td style={{ padding: "3px 6px", color: C.white, whiteSpace: "nowrap" }}>{row.symbol.replace(/\.(KS|KQ)$/, "")}</td>
+                          {g.items.map((col) => {
+                            const v = risk.correlationMatrix?.[row.symbol]?.[col.symbol];
+                            const ok = typeof v === "number";
+                            const abs = ok ? Math.min(Math.abs(v), 1) : 0;
+                            const alpha = 0.15 + abs * 0.55;
+                            const bg = !ok ? "transparent" : v >= 0 ? `rgba(43,217,79,${alpha})` : `rgba(255,59,59,${alpha})`;
+                            return (
+                              <td key={col.symbol} style={{ padding: "3px 6px", textAlign: "center", background: bg, color: C.white }}>
+                                {ok ? v.toFixed(2) : "—"}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ color: C.dim, fontSize: 9, marginTop: 10 }}>{t("riskNote")}</div>
+              </>
+            )}
+          </Panel>
+        </Fragment>
         );
       })}
 
