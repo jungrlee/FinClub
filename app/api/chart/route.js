@@ -10,7 +10,8 @@ export const dynamic = "force-dynamic";
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") || "";
-  const market = searchParams.get("market") === "KR" ? "KR" : "US";
+  const marketParam = searchParams.get("market");
+  const market = marketParam === "KR" || marketParam === "FX" ? marketParam : "US";
   const range = searchParams.get("range") || "1Y";
   if (!q) return NextResponse.json({ error: "missing q" }, { status: 400 });
 

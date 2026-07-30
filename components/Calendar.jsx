@@ -6,6 +6,9 @@ import { px, bigNum, daysUntil } from "../lib/format";
 export default function Calendar({ symbols, t, lang }) {
   const [events, setEvents] = useState(null);
   const [err, setErr] = useState(null);
+  const [econEvents, setEconEvents] = useState(null);
+  const [econErr, setEconErr] = useState(null);
+  const [econConfigured, setEconConfigured] = useState(true);
 
   useEffect(() => {
     if (!symbols.length) { setEvents([]); return; }
@@ -19,6 +22,22 @@ export default function Calendar({ symbols, t, lang }) {
       }
     })();
   }, [symbols.join(",")]);
+
+  // Part 1: general macro calendar (not tied to the watchlist) — fetched
+  // once regardless of what's in symbols.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/calendar/economic");
+        const d = await r.json();
+        setEconEvents(d.events || []);
+        setEconConfigured(d.configured !== false);
+        if (d.error) setEconErr(d.error);
+      } catch (e) {
+        setEconErr(String(e.message || e));
+      }
+    })();
+  }, []);
 
   if (events === null)
     return <div style={{ padding: 24, color: C.amber }}><span className="blink">█</span> LOADING CALENDAR...</div>;
@@ -36,6 +55,46 @@ export default function Calendar({ symbols, t, lang }) {
 
   return (
     <div style={{ flex: 1, padding: 6, overflow: "auto", display: "grid", gap: 6, alignContent: "start" }}>
+      {/* Part 1: general macro calendar — not tied to the watchlist */}
+      <Panel title={t("econCalendarTitle")}>
+        {!econConfigured && <Val color={C.dim} size={11}>{t("econNotConfigured")}</Val>}
+        {econConfigured && econErr && <div style={{ color: C.red, fontSize: 11 }}>{econErr}</div>}
+        {econConfigured && econEvents === null && (
+          <Val color={C.dim} size={11}><span className="blink">█</span> {t("loadingCalendar")}</Val>
+        )}
+        {econConfigured && econEvents && econEvents.length === 0 && !econErr && (
+          <Val color={C.dim} size={11}>{t("noEconEvents")}</Val>
+        )}
+        {econConfigured && econEvents && econEvents.length > 0 && (
+          <div style={{ display: "grid", gap: 2 }}>
+            {econEvents.map((e, i) => {
+              const n = daysUntil(e.date);
+              const urgent = n !== null && n >= 0 && n <= 7;
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "5px 8px",
+                  borderBottom: "1px solid #100C06", background: urgent ? "#120C02" : "transparent",
+                }}>
+                  <span style={{ color: urgent ? C.amber : C.white, fontSize: 11, minWidth: 78 }}>
+                    {new Date(e.date).toLocaleDateString(locale, { month: "short", day: "numeric" })}
+                  </span>
+                  <span style={{ color: C.white, fontSize: 11, flex: 1 }}>{e.name}</span>
+                  {e.upcoming ? (
+                    <span style={{ color: C.dim, fontSize: 9, border: `1px solid ${C.border}`, padding: "1px 6px" }}>{t("upcoming")}</span>
+                  ) : typeof e.actual === "number" ? (
+                    <span style={{ color: C.cyan, fontSize: 11 }}>{e.actual.toLocaleString()}</span>
+                  ) : (
+                    <span style={{ color: C.dim, fontSize: 11 }}>—</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ color: C.dim, fontSize: 9, marginTop: 8 }}>{t("econNote")}</div>
+      </Panel>
+
+      {/* Part 2: per-stock earnings calendar (unchanged) */}
       <Panel title={t("calendarTitle")}>
         {err && <div style={{ color: C.red, fontSize: 11 }}>{err}</div>}
         {dated.length === 0 && undated.length === 0 && (

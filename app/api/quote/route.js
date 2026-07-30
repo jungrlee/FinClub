@@ -12,7 +12,8 @@ const TTL = 60 * 1000;
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q") || "";
-  const market = searchParams.get("market") === "KR" ? "KR" : "US";
+  const marketParam = searchParams.get("market");
+  const market = marketParam === "KR" || marketParam === "FX" ? marketParam : "US";
   if (!q) return NextResponse.json({ error: "missing q" }, { status: 400 });
 
   const ck = `${market}:${q.toLowerCase()}`;

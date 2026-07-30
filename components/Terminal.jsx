@@ -9,6 +9,8 @@ import StockDetail from "./StockDetail";
 import Portfolio from "./Portfolio";
 import Calendar from "./Calendar";
 import Competition from "./Competition";
+import Currencies from "./Currencies";
+import News from "./News";
 import TickerInput from "./TickerInput";
 
 export default function Terminal({ session }) {
@@ -170,6 +172,8 @@ export default function Terminal({ session }) {
     { id: "portfolio", label: t("tabPortfolio") },
     { id: "calendar", label: t("tabCalendar") },
     { id: "competition", label: t("tabCompetition") },
+    { id: "currencies", label: t("tabCurrencies") },
+    { id: "news", label: t("tabNews") },
   ];
 
   return (
@@ -313,6 +317,8 @@ export default function Terminal({ session }) {
         {tab === "competition" && (
           <Competition user={user} session={session} t={t} liveQuotes={liveQuotes} onSymbolsChange={setCompetitionSymbols} />
         )}
+        {tab === "currencies" && <Currencies t={t} />}
+        {tab === "news" && <News t={t} lang={lang} />}
       </div>
 
       {/* status bar */}
