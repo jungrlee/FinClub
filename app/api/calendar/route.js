@@ -1,76 +1,31 @@
-// GET /api/calendar?symbols=AAPL,005930.KS
-// Aggregates upcoming earnings dates + consensus for every symbol in the
-// watchlist so the Calendar tab can show one sorted timeline.
+// GET /api/calendar?symbols=AAPL,005930
+// Aggregates upcoming earnings across the watchlist into one sorted timeline.
 import { NextResponse } from "next/server";
-import yahooFinance from "../../../lib/yahoo";
+import { getCalendar } from "../../../lib/providers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const cache = new Map();
-const TTL = 30 * 60 * 1000; // earnings dates move slowly — 30 min cache
-
-const num = (v) => (typeof v === "number" && isFinite(v) ? v : null);
-
-async function one(symbol) {
-  try {
-    const q = await yahooFinance.quote(symbol);
-    const s = await yahooFinance
-      .quoteSummary(symbol, {
-        modules: ["calendarEvents", "earningsTrend", "earningsHistory"],
-      })
-      .catch((e) => {
-        console.warn(`calendar quoteSummary failed for ${symbol}:`, e.message);
-        return {};
-      });
-
-    const cal = s.calendarEvents || {};
-    const dates = cal.earnings?.earningsDate || [];
-    const trend = (s.earningsTrend?.trend || []).find((t) => t.period === "0q") || {};
-    const hist = (s.earningsHistory?.history || []).slice(-4).reverse();
-
-    return {
-      symbol,
-      name: q.longName || q.shortName || symbol,
-      currency: q.currency,
-      price: num(q.regularMarketPrice),
-      changePct: num(q.regularMarketChangePercent),
-      date: dates.length ? dates[0] : null,
-      dateEstimated: dates.length > 1, // Yahoo gives a range when unconfirmed
-      dateEnd: dates.length > 1 ? dates[1] : null,
-      hour: cal.earnings?.earningsCallTime || null,
-      consensusEPS: num(trend.earningsEstimate?.avg),
-      consensusEPSLow: num(trend.earningsEstimate?.low),
-      consensusEPSHigh: num(trend.earningsEstimate?.high),
-      consensusRev: num(trend.revenueEstimate?.avg),
-      analysts: num(trend.earningsEstimate?.numberOfAnalysts),
-      exDividend: cal.exDividendDate || null,
-      dividendDate: cal.dividendDate || null,
-      // surprise history: did they beat or miss?
-      history: hist.map((h) => ({
-        q: h.quarter,
-        actual: num(h.epsActual),
-        est: num(h.epsEstimate),
-        surprisePct: num(h.surprisePercent) !== null ? h.surprisePercent * 100 : null,
-      })),
-    };
-  } catch (e) {
-    console.warn(`calendar failed for ${symbol}:`, e.message);
-    return { symbol, error: true };
-  }
-}
+const TTL = 30 * 60 * 1000;
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
   const symbols = (searchParams.get("symbols") || "")
-    .split(",").map((s) => s.trim()).filter(Boolean).slice(0, 40);
+    .split(",").map((s) => s.trim()).filter(Boolean).slice(0, 25);
   if (!symbols.length) return NextResponse.json({ events: [] });
 
   const key = symbols.slice().sort().join(",");
   const hit = cache.get(key);
   if (hit && Date.now() - hit.t < TTL) return NextResponse.json(hit.d);
 
-  const results = await Promise.all(symbols.map(one));
+  const results = await Promise.all(
+    symbols.map((s) =>
+      getCalendar(s, /^\d{6}$/.test(s) || /\.(KS|KQ)$/.test(s) ? "KR" : "US")
+        .catch((e) => { console.warn(`[calendar] ${s}: ${e.message}`); return { symbol: s, error: true }; })
+    )
+  );
+
   const events = results
     .filter((r) => !r.error)
     .sort((a, b) => {
