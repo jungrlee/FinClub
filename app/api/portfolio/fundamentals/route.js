@@ -5,7 +5,7 @@
 // less often (fundamentals/dividends, not daily price history) — fetched
 // on the same symbol-set-change cadence, not per price tick.
 import { NextResponse } from "next/server";
-import { getQuote, getDividends } from "../../../../lib/providers";
+import { getQuote } from "../../../../lib/providers";
 import { missingSectors } from "../../../../lib/providers/sectors";
 
 export const runtime = "nodejs";
@@ -17,23 +17,21 @@ export async function POST(req) {
     return NextResponse.json({ error: "no positions" }, { status: 400 });
   }
 
-  const oneYearAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 365).toISOString().slice(0, 10);
-
   const perSymbol = {};
   await Promise.all(positions.map(async (p) => {
     try {
-      const [quote, dividends] = await Promise.all([
-        getQuote(p.symbol, p.market),
-        getDividends(p.symbol, p.market).catch(() => []),
-      ]);
-      const annualDividendPerShare = dividends
-        .filter((d) => d.date >= oneYearAgo)
-        .reduce((s, d) => s + d.amount, 0);
+      const quote = await getQuote(p.symbol, p.market);
+      // Dividend-history endpoints (Twelve Data) 403 for nearly every free-tier
+      // symbol, so approximate trailing annual dividend from yield × price
+      // (both reliably populated via Finnhub's /stock/metric) rather than a
+      // precise trailing-12-month sum.
+      const annualDividendPerShare =
+        quote.divYieldPct && quote.price ? (quote.divYieldPct / 100) * quote.price : null;
       perSymbol[p.symbol] = {
         per: quote.per ?? null,
         divYieldPct: quote.divYieldPct ?? null,
         sector: quote.sector ?? null,
-        annualDividendPerShare: annualDividendPerShare || null,
+        annualDividendPerShare,
       };
     } catch (e) {
       console.warn(`[portfolio fundamentals] ${p.symbol}: ${e.message}`);
