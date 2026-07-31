@@ -47,7 +47,7 @@ export default function AuthScreen() {
       <div style={{ width: 400, maxWidth: "100%" }}>
         <div style={{ display: "flex", alignItems: "baseline" }}>
           <div style={{ fontSize: 26, letterSpacing: 3, color: "var(--amber)", marginBottom: 2 }}>
-            🐋 WHALES<span style={{ color: "var(--white)" }}>MARKET</span>
+            📈 FIN<span style={{ color: "var(--white)" }}>CLUB</span>
           </div>
           <button
             onClick={() => setLang(lang === "en" ? "ko" : "en")}

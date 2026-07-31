@@ -45,7 +45,7 @@ function LoginForm() {
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ width: 320, background: "var(--panel)", border: "1px solid var(--border)", padding: 20 }}>
         <div style={{ color: "var(--amber)", fontWeight: 700, fontSize: 14, letterSpacing: 2, marginBottom: 4 }}>
-          🐋 WHALESMARKET <span style={{ color: "var(--white)" }}>ADMIN</span>
+          📈 FINCLUB <span style={{ color: "var(--white)" }}>ADMIN</span>
         </div>
         <div style={{ color: "var(--amber-dim)", fontSize: 10, marginBottom: 16 }}>
           Competition administration console

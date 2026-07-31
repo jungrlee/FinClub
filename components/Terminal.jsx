@@ -185,7 +185,7 @@ export default function Terminal({ session }) {
             <button onClick={() => setSidebarOpen(true)} style={{ ...btn(false), padding: "4px 8px", fontSize: 14 }}>☰</button>
           )}
           <span style={{ color: C.amber, fontWeight: 700, fontSize: 13, letterSpacing: 2, whiteSpace: "nowrap" }}>
-            🐋 WHALES<span style={{ color: C.white }}>MARKET</span>
+            📈 FIN<span style={{ color: C.white }}>CLUB</span>
           </span>
           {!isMobile && (
             <div style={{ display: "flex", gap: 2 }}>

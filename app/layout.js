@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "WhalesMarket — US & Korean equities terminal",
+  title: "FinClub — US & Korean equities terminal",
   description:
     "Bloomberg-style terminal for US and Korean stocks: live quotes, analyst estimates, and AI forecasts.",
 };

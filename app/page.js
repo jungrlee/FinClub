@@ -24,7 +24,7 @@ export default function Home() {
   if (session === undefined)
     return (
       <div style={{ padding: 40, color: "var(--amber)" }}>
-        <span className="blink">▮</span> BOOTING WHALESMARKET...
+        <span className="blink">▮</span> BOOTING FINCLUB...
       </div>
     );
 

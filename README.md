@@ -1,4 +1,4 @@
-# 🐋 WhalesMarket
+# 📈 FinClub
 
 Bloomberg-style terminal for **US and Korean equities** — live quotes, real analyst consensus estimates, fundamentals, news, and Claude-powered AI forecasts. Built with Next.js 14 (App Router), Supabase auth + Postgres, Yahoo Finance data, and the Anthropic API. Deploys on Vercel.
 

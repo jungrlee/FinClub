@@ -150,15 +150,18 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   const myHoldings = useMemo(() => {
     return rows.map((r) => {
       const live = liveQuotes[r.symbol];
-      const price = live?.price ?? r.avg_cost;
-      const mktValue = r.shares * price;
+      // null (not avg_cost) when live data hasn't loaded yet — falling back
+      // to the purchase price silently disguised a stale/missing quote as a
+      // real one, which also made P&L read as exactly $0 until it loaded.
+      const price = live?.price ?? null;
+      const mktValue = price !== null ? r.shares * price : null;
       const costBasis = r.avg_cost * r.shares;
-      const pnl = mktValue - costBasis;
+      const pnl = mktValue !== null ? mktValue - costBasis : null;
       return { ...r, price, mktValue, pnl };
     });
   }, [rows, liveQuotes]);
 
-  const equity = participant ? participant.cash + myHoldings.reduce((s, h) => s + h.mktValue, 0) : null;
+  const equity = participant ? participant.cash + myHoldings.reduce((s, h) => s + (h.mktValue ?? 0), 0) : null;
   const returnPct = participant && equity !== null ? ((equity - participant.starting_cash) / participant.starting_cash) * 100 : null;
 
   if (loading) {
@@ -278,7 +281,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
               </thead>
               <tbody>
                 {myHoldings.map((h) => {
-                  const c = h.pnl >= 0 ? C.green : C.red;
+                  const c = (h.pnl ?? 0) >= 0 ? C.green : C.red;
                   return (
                     <tr key={h.id} style={{ borderBottom: "1px solid #100C06" }}>
                       <td style={{ ...td, textAlign: "left", color: h.shares < 0 ? C.red : C.amber }}>

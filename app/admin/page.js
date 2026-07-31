@@ -29,7 +29,7 @@ export default async function DashboardPage() {
     <div style={{ maxWidth: 900, margin: "0 auto", padding: 20 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
         <div style={{ color: "var(--amber)", fontWeight: 700, fontSize: 14, letterSpacing: 2 }}>
-          🐋 WHALESMARKET <span style={{ color: "var(--white)" }}>ADMIN</span>
+          📈 FINCLUB <span style={{ color: "var(--white)" }}>ADMIN</span>
         </div>
         <div style={{ color: "var(--amber-dim)", fontSize: 11 }}>{user.email}</div>
       </div>
