@@ -7,8 +7,9 @@
 import { NextResponse } from "next/server";
 import { getChart } from "../../../../lib/providers";
 import {
-  dailyReturns, alignReturns, mean, stddev, correlation,
+  dailyReturns, alignReturns, mean, stddev, correlation, covariance,
   annualizeVol, annualizeReturn, portfolioDailyReturns, beta, sharpeRatio, valueAtRisk95,
+  maxDrawdown, rollingSharpe, optimizePortfolio,
   MIN_HISTORY_DAYS,
 } from "../../../../lib/risk";
 
@@ -18,6 +19,7 @@ export const dynamic = "force-dynamic";
 // Static assumptions, not a live feed — stated plainly in the UI too.
 const RISK_FREE = { USD: 0.04, KRW: 0.03 };
 const BENCHMARK = { USD: { symbol: "SPY", market: "US" }, KRW: { symbol: "069500", market: "KR" } };
+const ROLLING_WINDOW_DAYS = 30;
 
 export async function POST(req) {
   const { positions, portfolioValue, currency } = await req.json();
@@ -26,6 +28,7 @@ export async function POST(req) {
   }
   const cur = currency === "KRW" ? "KRW" : "USD";
   const bench = BENCHMARK[cur];
+  const riskFree = RISK_FREE[cur];
 
   const [closesArr, benchCloses] = await Promise.all([
     Promise.all(positions.map((p) => getChart(p.symbol, p.market, "1Y").catch(() => []))),
@@ -44,10 +47,14 @@ export async function POST(req) {
   for (const p of positions) volatility[p.symbol] = annualizeVol(stddev(aligned[p.symbol]));
 
   const correlationMatrix = {};
+  const covMatrix = {};
   for (const a of positions) {
     correlationMatrix[a.symbol] = {};
+    covMatrix[a.symbol] = {};
     for (const b of positions) {
       correlationMatrix[a.symbol][b.symbol] = a.symbol === b.symbol ? 1 : correlation(aligned[a.symbol], aligned[b.symbol]);
+      const c = covariance(aligned[a.symbol], aligned[b.symbol]);
+      covMatrix[a.symbol][b.symbol] = c !== null ? c * 252 : null; // annualized
     }
   }
 
@@ -56,7 +63,7 @@ export async function POST(req) {
   const portVol = annualizeVol(stddev(portReturns));
   const portAnnualReturn = annualizeReturn(mean(portReturns));
   const portBeta = beta(portReturns, aligned.__bench);
-  const sharpe = sharpeRatio(portAnnualReturn, portVol, RISK_FREE[cur]);
+  const sharpe = sharpeRatio(portAnnualReturn, portVol, riskFree);
   const var95_1d = valueAtRisk95(portVol, portfolioValue);
 
   // Equity curve: sum(shares × close) per aligned day.
@@ -70,11 +77,35 @@ export async function POST(req) {
     return { d, v };
   });
 
+  // Benchmark rebased to the same starting value as the portfolio, so the
+  // two lines are visually comparable on one chart.
+  const benchByDate = new Map(benchCloses.map((c) => [c.d, c.c]));
+  const benchStart = benchByDate.get(dates[0]);
+  const portStart = equityCurve[0]?.v;
+  const benchmarkEquityCurve = dates.map((d) => {
+    const c = benchByDate.get(d);
+    const v = typeof c === "number" && benchStart && portStart ? (c / benchStart) * portStart : null;
+    return { d, v };
+  });
+
+  const drawdown = maxDrawdown(equityCurve);
+  const rollingSharpeSeries = portReturns.length >= ROLLING_WINDOW_DAYS
+    ? rollingSharpe(portReturns, dates, ROLLING_WINDOW_DAYS, riskFree)
+    : [];
+
+  const expectedReturns = {};
+  for (const p of positions) expectedReturns[p.symbol] = annualizeReturn(mean(aligned[p.symbol]));
+  const optimization = optimizePortfolio(positions.map((p) => p.symbol), covMatrix, expectedReturns, riskFree);
+
   return NextResponse.json({
     volatility,
     correlationMatrix,
-    portfolio: { volatility: portVol, beta: portBeta, sharpe, var95_1d, equityCurve },
+    portfolio: {
+      volatility: portVol, beta: portBeta, sharpe, var95_1d, equityCurve,
+      benchmarkEquityCurve, maxDrawdown: drawdown, rollingSharpe: rollingSharpeSeries,
+    },
+    optimization,
     benchmark: bench.symbol,
-    riskFreeRate: RISK_FREE[cur],
+    riskFreeRate: riskFree,
   });
 }

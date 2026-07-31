@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo, Fragment } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ReferenceLine, ResponsiveContainer, CartesianGrid } from "recharts";
 import { supabase } from "../lib/supabaseClient";
 import { C, Label, Val, btn, inputS, Panel } from "./ui";
 import { px, pctStr, signed, bigNum } from "../lib/format";
@@ -14,6 +14,7 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
   const [riskByCurrency, setRiskByCurrency] = useState({});
   const [riskLoading, setRiskLoading] = useState({});
   const [riskErr, setRiskErr] = useState({});
+  const [fundByCurrency, setFundByCurrency] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -118,6 +119,15 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
         })
         .catch((e) => setRiskErr((x) => ({ ...x, [g.cur]: String(e.message || e) })))
         .finally(() => setRiskLoading((x) => ({ ...x, [g.cur]: false })));
+
+      fetch("/api/portfolio/fundamentals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ positions: g.items.map((it) => ({ symbol: it.symbol, market: it.market })) }),
+      })
+        .then((r) => r.json())
+        .then((d) => { if (!d.error) setFundByCurrency((x) => ({ ...x, [g.cur]: d })); })
+        .catch(() => {});
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posSignature]);
@@ -135,6 +145,27 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
         const risk = riskByCurrency[g.cur];
         const rLoading = riskLoading[g.cur];
         const rErr = riskErr[g.cur];
+        const fund = fundByCurrency[g.cur]?.perSymbol || {};
+        const missingSecs = fundByCurrency[g.cur]?.missingSectors || [];
+        const sectorAlloc = (() => {
+          const bySector = {};
+          for (const it of g.items) {
+            const sector = fund[it.symbol]?.sector || t("unknownSector");
+            bySector[sector] = (bySector[sector] || 0) + (it.weight || 0);
+          }
+          return Object.entries(bySector).sort((a, b) => b[1] - a[1]);
+        })();
+        const dividendIncome = (() => {
+          let annual = 0, costForYield = 0;
+          for (const it of g.items) {
+            const perShare = fund[it.symbol]?.annualDividendPerShare;
+            if (typeof perShare === "number") {
+              annual += perShare * it.shares;
+              costForYield += it.costBasis;
+            }
+          }
+          return { annual, yieldOnCost: costForYield > 0 ? (annual / costForYield) * 100 : null };
+        })();
         return (
         <Fragment key={g.cur}>
           <Panel title={`${t("portfolioTitle")} · ${g.cur}`}>
@@ -173,6 +204,9 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
                     <th style={th}>%</th>
                     <th style={th}>{t("dayPnl")}</th>
                     <th style={th}>{t("weight")}</th>
+                    <th style={th}>P/E</th>
+                    <th style={th}>{t("divYield")}</th>
+                    <th style={{ ...th, textAlign: "left" }}>{t("sector")}</th>
                     <th style={th}></th>
                   </tr>
                 </thead>
@@ -180,6 +214,7 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
                   {g.items.map((it) => {
                     const c = (it.pnl ?? 0) >= 0 ? C.green : C.red;
                     const dcc = (it.dayPnl ?? 0) >= 0 ? C.green : C.red;
+                    const f = fund[it.symbol];
                     return (
                       <tr key={it.id} style={{ borderBottom: "1px solid #100C06" }}>
                         <td style={{ ...td, textAlign: "left", color: C.amber }}>
@@ -200,6 +235,9 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
                             <div style={{ width: `${it.weight ?? 0}%`, height: "100%", background: C.amber }} />
                           </div>
                         </td>
+                        <td style={{ ...td, color: C.white }}>{typeof f?.per === "number" ? f.per.toFixed(1) : "—"}</td>
+                        <td style={{ ...td, color: C.white }}>{typeof f?.divYieldPct === "number" ? `${f.divYieldPct.toFixed(2)}%` : "—"}</td>
+                        <td style={{ ...td, textAlign: "left", color: C.dim, whiteSpace: "nowrap" }}>{f?.sector || "—"}</td>
                         <td style={td}>
                           <button onClick={() => remove(it.id)}
                             style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 12 }}>✕</button>
@@ -237,20 +275,48 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
                     <Label>{t("varLabel")}</Label><br />
                     <Val size={16} color={C.red}>{typeof risk.portfolio.var95_1d === "number" ? px(risk.portfolio.var95_1d, g.cur) : "—"}</Val>
                   </div>
+                  <div>
+                    <Label>{t("maxDrawdown")}</Label><br />
+                    <Val size={16} color={C.red}>
+                      {typeof risk.portfolio.maxDrawdown?.pct === "number" ? `${(risk.portfolio.maxDrawdown.pct * 100).toFixed(1)}%` : "—"}
+                    </Val>
+                  </div>
                 </div>
 
-                <div style={{ marginBottom: 14 }}>
-                  <ResponsiveContainer width="100%" height={140}>
-                    <LineChart data={risk.portfolio.equityCurve}>
+                <Label>{t("equityVsBenchmark")} ({risk.benchmark})</Label>
+                <div style={{ marginTop: 4, marginBottom: 14 }}>
+                  <ResponsiveContainer width="100%" height={160}>
+                    <LineChart data={risk.portfolio.equityCurve.map((pt, i) => ({
+                      d: pt.d, portfolio: pt.v, benchmark: risk.portfolio.benchmarkEquityCurve?.[i]?.v ?? null,
+                    }))}>
                       <CartesianGrid stroke="#181206" vertical={false} />
                       <XAxis dataKey="d" tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }} minTickGap={50} />
                       <YAxis domain={["auto", "auto"]} tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }}
                         width={60} tickFormatter={(v) => v.toLocaleString()} />
                       <Tooltip
                         contentStyle={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 11 }}
+                        labelStyle={{ color: C.dim }}
+                        formatter={(v, name) => [px(v, g.cur), name]} />
+                      <Legend wrapperStyle={{ fontSize: 10 }} formatter={(v) => <span style={{ color: C.white }}>{v}</span>} />
+                      <Line type="monotone" dataKey="portfolio" name={t("portfolioTitle")} stroke={C.amber} dot={false} strokeWidth={1.6} />
+                      <Line type="monotone" dataKey="benchmark" name={risk.benchmark} stroke={C.cyan} dot={false} strokeWidth={1.4} strokeDasharray="4 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <Label>{t("rollingSharpeTitle")}</Label>
+                <div style={{ marginTop: 4, marginBottom: 14 }}>
+                  <ResponsiveContainer width="100%" height={110}>
+                    <LineChart data={risk.portfolio.rollingSharpe}>
+                      <CartesianGrid stroke="#181206" vertical={false} />
+                      <XAxis dataKey="d" tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }} minTickGap={50} />
+                      <YAxis domain={["auto", "auto"]} tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }} width={40} />
+                      <Tooltip
+                        contentStyle={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 11 }}
                         labelStyle={{ color: C.dim }} itemStyle={{ color: C.amber }}
-                        formatter={(v) => [px(v, g.cur), "Value"]} />
-                      <Line type="monotone" dataKey="v" stroke={C.amber} dot={false} strokeWidth={1.6} />
+                        formatter={(v) => [typeof v === "number" ? v.toFixed(2) : "—", t("sharpeLabel")]} />
+                      <ReferenceLine y={0} stroke={C.border} />
+                      <Line type="monotone" dataKey="sharpe" stroke={C.amber} dot={false} strokeWidth={1.4} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -293,6 +359,85 @@ export default function Portfolio({ user, t, liveQuotes, onSymbolsChange }) {
               </>
             )}
           </Panel>
+
+          <Panel title={`${t("sectorTitle")} · ${g.cur}`}>
+            <div style={{ display: "flex", gap: 30, flexWrap: "wrap", marginBottom: 14 }}>
+              <div>
+                <Label>{t("estAnnualDividend")}</Label><br />
+                <Val size={16} color={C.green}>{dividendIncome.annual > 0 ? px(dividendIncome.annual, g.cur) : "—"}</Val>
+              </div>
+              <div>
+                <Label>{t("yieldOnCost")}</Label><br />
+                <Val size={16}>{dividendIncome.yieldOnCost !== null ? `${dividendIncome.yieldOnCost.toFixed(2)}%` : "—"}</Val>
+              </div>
+            </div>
+            {g.cur === "KRW" && <div style={{ color: C.dim, fontSize: 9, marginBottom: 10 }}>{t("krFundamentalsNote")}</div>}
+
+            <Label>{t("sectorAllocation")}</Label>
+            <div style={{ display: "grid", gap: 6, marginTop: 6, marginBottom: 14 }}>
+              {sectorAlloc.map(([sector, weight]) => (
+                <div key={sector}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 2 }}>
+                    <span style={{ color: C.white }}>{sector}</span>
+                    <span style={{ color: C.dim }}>{weight.toFixed(1)}%</span>
+                  </div>
+                  <div style={{ background: "#141008", height: 6 }}>
+                    <div style={{ width: `${Math.min(weight, 100)}%`, height: "100%", background: C.amber }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {missingSecs.length > 0 && (
+              <div>
+                <Label>{t("diversificationIdeas")}</Label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                  {missingSecs.map((s) => (
+                    <span key={s.sector} style={{ border: `1px solid ${C.border}`, color: C.dim, fontSize: 10, padding: "3px 8px" }}>
+                      {s.sector}: <span style={{ color: C.amber }}>{s.tickers.join(", ")}</span>
+                    </span>
+                  ))}
+                </div>
+                <div style={{ color: C.dim, fontSize: 9, marginTop: 6 }}>{t("diversificationNote")}</div>
+              </div>
+            )}
+          </Panel>
+
+          {risk?.optimization && (
+            <Panel title={`${t("optimizationTitle")} · ${g.cur}`}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <th style={{ ...th, textAlign: "left" }}>{t("symbol")}</th>
+                      <th style={th}>{t("currentWeight")}</th>
+                      <th style={th}>{t("maxSharpeWeight")}</th>
+                      <th style={th}>{t("minVarWeight")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.items.map((it) => (
+                      <tr key={it.symbol} style={{ borderBottom: "1px solid #100C06" }}>
+                        <td style={{ ...td, textAlign: "left", color: C.amber }}>{it.symbol.replace(/\.(KS|KQ)$/, "")}</td>
+                        <td style={{ ...td, color: C.white }}>{it.weight !== null ? `${it.weight.toFixed(1)}%` : "—"}</td>
+                        <td style={{ ...td, color: C.green }}>
+                          {typeof risk.optimization.maxSharpe?.weights?.[it.symbol] === "number" ? `${(risk.optimization.maxSharpe.weights[it.symbol] * 100).toFixed(1)}%` : "—"}
+                        </td>
+                        <td style={{ ...td, color: C.cyan }}>
+                          {typeof risk.optimization.minVariance?.weights?.[it.symbol] === "number" ? `${(risk.optimization.minVariance.weights[it.symbol] * 100).toFixed(1)}%` : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
+                <span><Label>{t("maxSharpeResult")} </Label><Val color={C.green}>{typeof risk.optimization.maxSharpe?.sharpe === "number" ? risk.optimization.maxSharpe.sharpe.toFixed(2) : "—"}</Val></span>
+                <span><Label>{t("minVarResult")} </Label><Val color={C.cyan}>{typeof risk.optimization.minVariance?.vol === "number" ? `${(risk.optimization.minVariance.vol * 100).toFixed(1)}%` : "—"}</Val></span>
+              </div>
+              <div style={{ color: C.dim, fontSize: 9, marginTop: 10 }}>{t("optimizationNote")}</div>
+            </Panel>
+          )}
         </Fragment>
         );
       })}
