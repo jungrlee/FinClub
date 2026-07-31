@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { C, Label, Val, btn, inputS, Panel } from "./ui";
 import { px, signed, bigNum, daysUntil } from "../lib/format";
@@ -14,6 +14,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   const [leaderboardErr, setLeaderboardErr] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [err, setErr] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   // ---- ticket state ----
   const [market, setMarket] = useState("US");
@@ -75,6 +76,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "failed to load leaderboard");
       setRanked(d.ranked || []);
+      setLastUpdated(Date.now());
     } catch (e) {
       setLeaderboardErr(String(e.message || e));
     }
@@ -82,23 +84,31 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
 
   useEffect(() => { loadLeaderboard(); }, [loadLeaderboard]);
 
+  // Latest-callback ref so the interval below never needs to restart just
+  // because loadCompetition/loadHoldings/loadLeaderboard got new function
+  // identities (they do, on nearly every poll — `participant`/`competition`
+  // are freshly-deserialized objects each time) — tearing the interval down
+  // and rebuilding it that often was fragile. The effect itself now only
+  // depends on the competition's id, a stable primitive.
+  const pollRef = useRef(() => {});
+  pollRef.current = () => { loadCompetition(true); loadHoldings(); loadLeaderboard(); };
+
   // Live refresh — without this, another member joining/trading, or just
   // prices moving, never shows up until a manual reload. Pauses while the
   // tab is hidden, same idea as lib/format.js's useRealtimeQuotes.
   useEffect(() => {
-    if (!competition) return;
-    const poll = () => { loadCompetition(true); loadHoldings(); loadLeaderboard(); };
-    let id = setInterval(poll, 15000);
+    if (!competition?.id) return;
+    let id = setInterval(() => pollRef.current(), 15000);
     const onVis = () => {
       clearInterval(id);
-      if (!document.hidden) id = setInterval(poll, 15000);
+      if (!document.hidden) id = setInterval(() => pollRef.current(), 15000);
     };
     document.addEventListener("visibilitychange", onVis);
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [competition, loadCompetition, loadHoldings, loadLeaderboard]);
+  }, [competition?.id]);
 
   const join = async () => {
     setBusy(true); setErr(null);
@@ -160,6 +170,13 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
       return { ...r, price, mktValue, pnl };
     });
   }, [rows, liveQuotes]);
+
+  // Sell is restricted to symbols you actually hold (and can't exceed what
+  // you hold) — no shorting via this ticket.
+  const heldShares = useMemo(() => Object.fromEntries(rows.map((r) => [r.symbol, r.shares])), [rows]);
+  const sellQty = parseFloat(qty);
+  const ownedQty = preview ? heldShares[preview.symbol] || 0 : 0;
+  const sellBlocked = side === "sell" && preview && (ownedQty <= 0 || (sellQty > 0 && sellQty > ownedQty));
 
   const equity = participant ? participant.cash + myHoldings.reduce((s, h) => s + (h.mktValue ?? 0), 0) : null;
   const returnPct = participant && equity !== null ? ((equity - participant.starting_cash) / participant.starting_cash) * 100 : null;
@@ -242,7 +259,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
             <Label>{t("side")}</Label>
             <div style={{ display: "flex", gap: 4, marginTop: 3 }}>
               <button onClick={() => setSide("buy")} style={{ ...btn(side === "buy"), flex: 1, padding: "6px 0" }}>{t("buy")}</button>
-              <button onClick={() => setSide("sell")} style={{ ...btn(side === "sell"), flex: 1, padding: "6px 0" }}>{t("sell")}/{t("short")}</button>
+              <button onClick={() => setSide("sell")} style={{ ...btn(side === "sell"), flex: 1, padding: "6px 0" }}>{t("sell")}</button>
             </div>
           </div>
           <div>
@@ -250,11 +267,19 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
             <input style={inputS} type="number" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="10" />
           </div>
           <div>
-            <button style={btn(true)} onClick={submitOrder} disabled={busy || !preview || !(parseFloat(qty) > 0)}>
+            <button style={btn(true)} onClick={submitOrder} disabled={busy || !preview || !(parseFloat(qty) > 0) || sellBlocked}>
               {busy ? "..." : t("submitOrder")}
             </button>
           </div>
         </div>
+        {side === "sell" && preview && (
+          <div style={{ marginTop: 8, fontSize: 11, color: C.dim }}>
+            {t("youOwn")} <Val color={C.white}>{ownedQty.toLocaleString()}</Val> {preview.symbol}
+            {sellBlocked && (
+              <span style={{ color: C.red }}>{" "}— {ownedQty <= 0 ? t("noSharesToSell") : t("exceedsHeld")}</span>
+            )}
+          </div>
+        )}
         {preview && (
           <div style={{ marginTop: 8, fontSize: 11, color: C.white }}>
             {preview.name} ({preview.symbol}) — <Val color={C.amber}>{px(preview.price, preview.currency)}</Val>
@@ -301,7 +326,16 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
         )}
       </Panel>
 
-      <Panel title={t("leaderboard")} right={<button style={{ ...btn(false), padding: "2px 8px" }} onClick={loadLeaderboard}>{t("refresh")}</button>}>
+      <Panel title={t("leaderboard")} right={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {lastUpdated && (
+            <span style={{ color: C.dim, fontSize: 9 }}>
+              {t("updated")} {new Date(lastUpdated).toLocaleTimeString()}
+            </span>
+          )}
+          <button style={{ ...btn(false), padding: "2px 8px" }} onClick={loadLeaderboard}>{t("refresh")}</button>
+        </div>
+      }>
         {leaderboardErr && <div style={{ color: C.red, fontSize: 11, marginBottom: 8 }}>{leaderboardErr}</div>}
         {!leaderboardErr && ranked.length === 0 && (
           <Val color={C.dim} size={11}>{t("noParticipants")}</Val>
