@@ -1,9 +1,62 @@
 "use client";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell,
+} from "recharts";
 import { supabase } from "../lib/supabaseClient";
 import { C, Label, Val, btn, inputS, Panel } from "./ui";
 import { px, signed, bigNum, daysUntil } from "../lib/format";
 import TickerInput from "./TickerInput";
+
+const MEDALS = ["🥇", "🥈", "🥉"];
+// Decorative, non-semantic hues for pie slices — deliberately avoids
+// green/red since those always mean gain/loss elsewhere in this app.
+const PIE_COLORS = [C.amber, C.cyan, "#8b7fd8", "#ff9466", "#5fb8a3", "#d87fb0", C.dim];
+
+// Sorted largest-first, capped to 6 slices + a folded "Other" bucket so a
+// participant with many small positions doesn't produce an unreadable pie.
+// Short positions (negative shares) size by exposure magnitude, labeled.
+function buildAllocation(holdings, shortLabel, otherLabel) {
+  const data = (holdings || [])
+    .filter((h) => typeof h.mktValue === "number" && h.mktValue !== 0)
+    .map((h) => ({
+      name: h.symbol.replace(/\.(KS|KQ)$/, "") + (h.shares < 0 ? ` (${shortLabel})` : ""),
+      value: Math.abs(h.mktValue),
+    }))
+    .sort((a, b) => b.value - a.value);
+  if (data.length <= 6) return data;
+  const top = data.slice(0, 6);
+  const otherSum = data.slice(6).reduce((s, x) => s + x.value, 0);
+  return [...top, { name: otherLabel, value: otherSum }];
+}
+
+function AllocationPie({ items }) {
+  if (!items || items.length === 0) return null;
+  const total = items.reduce((s, x) => s + x.value, 0);
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <ResponsiveContainer width={120} height={120}>
+        <PieChart>
+          <Pie data={items} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={26} outerRadius={50} paddingAngle={1} stroke="none">
+            {items.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+          </Pie>
+          <Tooltip contentStyle={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 10 }}
+            formatter={(v, n) => [bigNum(v, "USD"), n]} />
+        </PieChart>
+      </ResponsiveContainer>
+      <div style={{ display: "grid", gap: 3 }}>
+        {items.map((it, i) => (
+          <div key={it.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], display: "inline-block", flexShrink: 0 }} />
+            <span style={{ color: C.white }}>{it.name}</span>
+            <span style={{ color: C.dim }}>{total > 0 ? `${((it.value / total) * 100).toFixed(1)}%` : ""}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Competition({ user, session, t, liveQuotes, onSymbolsChange }) {
   const [loading, setLoading] = useState(true);
@@ -83,6 +136,43 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   }, [authFetch, competition]);
 
   useEffect(() => { loadLeaderboard(); }, [loadLeaderboard]);
+
+  // ---- equity history (all participants, reconstructed from trades) ----
+  // Deliberately NOT on the 15s poll — it fans out to historical closes for
+  // every traded symbol, comparatively expensive. Loaded once per
+  // competition and on manual refresh only.
+  const [equityHistory, setEquityHistory] = useState(null);
+  const [equityHistoryErr, setEquityHistoryErr] = useState(null);
+  const [equityHistoryLoading, setEquityHistoryLoading] = useState(false);
+
+  const loadEquityHistory = useCallback(async () => {
+    if (!competition) return;
+    setEquityHistoryLoading(true);
+    setEquityHistoryErr(null);
+    try {
+      const r = await authFetch(`/api/competition/equity-history?competitionId=${competition.id}`);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "failed to load equity history");
+      setEquityHistory(d);
+    } catch (e) {
+      setEquityHistoryErr(String(e.message || e));
+    }
+    setEquityHistoryLoading(false);
+  }, [authFetch, competition]);
+
+  useEffect(() => {
+    if (competition?.id) loadEquityHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [competition?.id]);
+
+  const equityChartData = useMemo(() => {
+    if (!equityHistory) return [];
+    return equityHistory.dates.map((d, i) => {
+      const point = { d };
+      equityHistory.series.forEach((s) => { point[s.participantId] = s.curve[i]?.v ?? null; });
+      return point;
+    });
+  }, [equityHistory]);
 
   // Latest-callback ref so the interval below never needs to restart just
   // because loadCompetition/loadHoldings/loadLeaderboard got new function
@@ -181,6 +271,10 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   const equity = participant ? participant.cash + myHoldings.reduce((s, h) => s + (h.mktValue ?? 0), 0) : null;
   const returnPct = participant && equity !== null ? ((equity - participant.starting_cash) / participant.starting_cash) * 100 : null;
 
+  const myAllocation = useMemo(() => buildAllocation(myHoldings, t("short"), t("other")), [myHoldings, t]);
+  const myRankIdx = ranked.findIndex((r) => r.userId === user.id);
+  const myRank = myRankIdx >= 0 ? myRankIdx + 1 : null;
+
   if (loading) {
     return <Panel title={t("competitionTitle")}><Val color={C.dim} size={11}>...</Val></Panel>;
   }
@@ -220,14 +314,60 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
   return (
     <div style={{ flex: 1, padding: 6, overflow: "auto", display: "grid", gap: 6, alignContent: "start" }}>
       <Panel title={`${competition.name} · ${daysLeft >= 0 ? `${daysLeft} ${t("daysLeft")}` : t("ended")}`}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 20 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 20, alignItems: "center" }}>
           <div><Label>{t("cashBal")}</Label><br /><Val size={18}>{px(participant.cash, "USD")}</Val></div>
           <div><Label>{t("equity")}</Label><br /><Val size={18} color={C.cyan}>{px(equity, "USD")}</Val></div>
           <div>
             <Label>{t("returnPct")}</Label><br />
             <Val size={18} color={pc}>{returnPct !== null ? `${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(2)}%` : "—"}</Val>
           </div>
+          {myRank && (
+            <div style={{ marginLeft: "auto", padding: "6px 14px", border: `1px solid var(--amber-dim)`, background: "#1A1204" }}>
+              <Val size={13} color={C.amber}>{MEDALS[myRankIdx] || `#${myRank}`} {t("yourRank")} {myRank} {t("ofN")} {ranked.length}</Val>
+            </div>
+          )}
         </div>
+      </Panel>
+
+      <Panel title={t("equityChartTitle")} right={
+        <button style={{ ...btn(false), padding: "2px 8px" }} onClick={loadEquityHistory} disabled={equityHistoryLoading}>
+          {equityHistoryLoading ? "..." : t("refresh")}
+        </button>
+      }>
+        {equityHistoryErr && <div style={{ color: C.red, fontSize: 11 }}>{equityHistoryErr}</div>}
+        {!equityHistoryErr && equityChartData.length < 2 && (
+          <Val color={C.dim} size={11}>{t("insufficientHistory")}</Val>
+        )}
+        {equityChartData.length >= 2 && equityHistory && (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={equityChartData}>
+              <CartesianGrid stroke="#181206" vertical={false} />
+              <XAxis dataKey="d" tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }} minTickGap={50} />
+              <YAxis domain={["auto", "auto"]} tick={{ fill: C.dim, fontSize: 9 }} axisLine={{ stroke: C.border }}
+                width={64} tickFormatter={(v) => bigNum(v, "USD")} />
+              <Tooltip
+                contentStyle={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 11 }}
+                labelStyle={{ color: C.dim }}
+                formatter={(v, name) => [px(v, "USD"), equityHistory.series.find((s) => s.participantId === name)?.displayName || name]} />
+              <Legend
+                wrapperStyle={{ fontSize: 10 }}
+                payload={[
+                  { value: t("you"), type: "line", color: C.amber },
+                  { value: t("otherParticipants"), type: "line", color: C.dim },
+                ]}
+                formatter={(v) => <span style={{ color: C.white }}>{v}</span>}
+              />
+              {equityHistory.series.map((s) => {
+                const mine = s.userId === user.id;
+                return (
+                  <Line key={s.participantId} type="monotone" dataKey={s.participantId}
+                    stroke={mine ? C.amber : C.dim} strokeWidth={mine ? 2.2 : 1} dot={false}
+                    strokeOpacity={mine ? 1 : 0.55} isAnimationActive={false} />
+                );
+              })}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
       </Panel>
 
       <Panel title={t("placeOrder")}>
@@ -292,6 +432,10 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
         {myHoldings.length === 0 ? (
           <Val color={C.dim} size={11}>{t("noHoldings")}</Val>
         ) : (
+          <>
+          <div style={{ marginBottom: 14 }}>
+            <AllocationPie items={myAllocation} />
+          </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
@@ -323,6 +467,7 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
               </tbody>
             </table>
           </div>
+          </>
         )}
       </Panel>
 
@@ -360,8 +505,8 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
                 return (
                   <Fragment key={r.participantId}>
                     <tr style={{ borderBottom: "1px solid #100C06", background: mine ? "#1A1204" : "transparent" }}>
-                      <td style={{ ...td, textAlign: "left", color: C.amber }}>#{i + 1}</td>
-                      <td style={{ ...td, textAlign: "left", color: C.white }}>{r.displayName}{mine ? " (you)" : ""}</td>
+                      <td style={{ ...td, textAlign: "left", color: C.amber, fontSize: MEDALS[i] ? 14 : 11 }}>{MEDALS[i] || `#${i + 1}`}</td>
+                      <td style={{ ...td, textAlign: "left", color: C.white }}>{r.displayName}{mine ? ` (${t("you").toLowerCase()})` : ""}</td>
                       <td style={{ ...td, color: C.cyan }}>{px(r.equity, "USD")}</td>
                       <td style={{ ...td, color: rc }}>{r.returnPct >= 0 ? "+" : ""}{r.returnPct.toFixed(2)}%</td>
                       <td style={td}>
@@ -373,7 +518,12 @@ export default function Competition({ user, session, t, liveQuotes, onSymbolsCha
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={5} style={{ padding: "6px 10px", background: "#0A0700" }}>
+                        <td colSpan={5} style={{ padding: "10px", background: "#0A0700" }}>
+                          {r.holdings.length > 0 && (
+                            <div style={{ marginBottom: 12 }}>
+                              <AllocationPie items={buildAllocation(r.holdings, t("short"), t("other"))} />
+                            </div>
+                          )}
                           <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
                             <div>
                               <Label>{t("holdings")}</Label>
