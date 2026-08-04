@@ -51,7 +51,7 @@ function divergingColor(pct) {
 }
 
 function HeatmapCell(props) {
-  const { x, y, width, height, name, changePct, depth } = props;
+  const { x, y, width, height, displayName, changePct, depth } = props;
   // Treemap renders its own synthetic root wrapper node (the whole chart
   // area, depth 0) through this same content renderer before any of the
   // actual data leaves — it has no name/changePct of its own, so it must
@@ -63,11 +63,11 @@ function HeatmapCell(props) {
   const showPct = showLabel && hasPct && height > 40;
   return (
     <g>
-      <rect x={x} y={y} width={width} height={height} style={{ fill, stroke: "#0a0a08", strokeWidth: 2 }} />
+      <rect x={x} y={y} width={width} height={height} style={{ fill, stroke: "#0a0a08", strokeWidth: 2, cursor: "pointer" }} />
       {showLabel && (
         <text x={x + width / 2} y={y + height / 2 - (showPct ? 5 : 0)} textAnchor="middle"
-          fill="#fff" fontSize={Math.min(11, width / 6)} fontWeight={600}>
-          {name}
+          fill="#fff" fontSize={Math.min(11, width / 8)} fontWeight={600}>
+          {displayName}
         </text>
       )}
       {showPct && (
@@ -76,6 +76,22 @@ function HeatmapCell(props) {
         </text>
       )}
     </g>
+  );
+}
+
+function HeatmapTooltip({ active, payload, t }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  const color = (d.changePct ?? 0) >= 0 ? KR_UP : KR_DOWN;
+  return (
+    <div style={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 11, padding: "6px 9px" }}>
+      <div style={{ color: C.amber, marginBottom: 3 }}>{d.displayName} <span style={{ color: C.dim }}>({d.name})</span></div>
+      <div style={{ color: C.white }}>{px(d.price, "KRW")} <span style={{ color }}>{d.changePct >= 0 ? "+" : ""}{d.changePct?.toFixed(2)}%</span></div>
+      <div style={{ color: C.dim, marginTop: 2 }}>{t("marketCapLabel")}: {bigNum(d.size, "KRW")}</div>
+      {typeof d.tradingValueKrw === "number" && (
+        <div style={{ color: C.dim }}>{t("tradingValueLabel")}: {bigNum(d.tradingValueKrw, "KRW")}</div>
+      )}
+    </div>
   );
 }
 
@@ -207,7 +223,10 @@ export default function KRMarketOverview({ t }) {
   const heatmapData = ranking
     .filter((s) => s.marketCapKrw)
     .slice(0, 80)
-    .map((s) => ({ name: s.symbol, displayName: s.name, size: s.marketCapKrw, changePct: s.changePct ?? 0 }));
+    .map((s) => ({
+      name: s.symbol, displayName: s.name, size: s.marketCapKrw, changePct: s.changePct ?? 0,
+      price: s.price, tradingValueKrw: s.tradingValueKrw,
+    }));
 
   if (loading) {
     return <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: C.dim, fontSize: 12 }}>{t("loadingMarket")}</div>;
@@ -258,23 +277,38 @@ export default function KRMarketOverview({ t }) {
                   <Pie data={breadthPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={22} outerRadius={40} paddingAngle={1} stroke="none">
                     {breadthPie.map((it, i) => <Cell key={i} fill={it.color} />)}
                   </Pie>
-                  <Tooltip contentStyle={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 10 }} />
+                  <Tooltip
+                    contentStyle={{ background: "#0D0800", border: "1px solid var(--amber-dim)", fontSize: 10 }}
+                    labelStyle={{ color: C.dim }} itemStyle={{ color: C.white }}
+                    formatter={(v, n) => [v.toLocaleString(), n]} />
                 </PieChart>
               </ResponsiveContainer>
               <div style={{ display: "grid", gap: 3 }}>
-                {breadthPie.map((it) => (
-                  <div key={it.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: it.color, display: "inline-block" }} />
-                    <span style={{ color: C.white }}>{it.name}</span>
-                    <span style={{ color: C.dim }}>{it.value.toLocaleString()}</span>
-                  </div>
-                ))}
+                {breadthPie.map((it) => {
+                  const breadthTotal = breadthPie.reduce((s, x) => s + x.value, 0);
+                  const sharePct = breadthTotal > 0 ? (it.value / breadthTotal) * 100 : 0;
+                  return (
+                    <div key={it.name} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: it.color, display: "inline-block" }} />
+                      <span style={{ color: C.white }}>{it.name}</span>
+                      <span style={{ color: C.dim }}>{it.value.toLocaleString()} ({sharePct.toFixed(1)}%)</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
-          <div style={{ marginBottom: 8 }}>
-            <Label>{t("tradingValueLabel")}</Label>
-            <div style={{ color: C.amber, fontSize: 14 }}>{bigNum(active?.pulse?.tradingValueKrw, "KRW")}</div>
+          <div style={{ display: "flex", gap: 16, marginBottom: 8 }}>
+            <div>
+              <Label>{t("tradingValueLabel")}</Label>
+              <div style={{ color: C.amber, fontSize: 14 }}>{bigNum(active?.pulse?.tradingValueKrw, "KRW")}</div>
+            </div>
+            <div>
+              <Label>52W</Label>
+              <div style={{ color: C.white, fontSize: 12 }}>
+                {active?.pulse?.low52w?.toLocaleString() ?? "—"} – {active?.pulse?.high52w?.toLocaleString() ?? "—"}
+              </div>
+            </div>
           </div>
           <Label>{t("investorFlowsTitle")}</Label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: 4 }}>
@@ -337,7 +371,9 @@ export default function KRMarketOverview({ t }) {
       {/* heatmap */}
       <Panel title={`${activeIndex} — ${t("heatmapTitle")}`} style={{ marginBottom: 8 }}>
         <ResponsiveContainer width="100%" height={420}>
-          <Treemap data={heatmapData} dataKey="size" type="flat" stroke="#0a0a08" content={<HeatmapCell />} />
+          <Treemap data={heatmapData} dataKey="size" type="flat" stroke="#0a0a08" content={<HeatmapCell />}>
+            <Tooltip content={<HeatmapTooltip t={t} />} />
+          </Treemap>
         </ResponsiveContainer>
       </Panel>
 
