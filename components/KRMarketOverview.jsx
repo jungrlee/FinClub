@@ -51,10 +51,16 @@ function divergingColor(pct) {
 }
 
 function HeatmapCell(props) {
-  const { x, y, width, height, name, changePct } = props;
-  const fill = divergingColor(changePct);
+  const { x, y, width, height, name, changePct, depth } = props;
+  // Treemap renders its own synthetic root wrapper node (the whole chart
+  // area, depth 0) through this same content renderer before any of the
+  // actual data leaves — it has no name/changePct of its own, so it must
+  // be skipped rather than drawn as a giant "N/A" tile.
+  if (depth === 0) return null;
+  const hasPct = typeof changePct === "number";
+  const fill = divergingColor(hasPct ? changePct : null);
   const showLabel = width > 38 && height > 24;
-  const showPct = showLabel && height > 40;
+  const showPct = showLabel && hasPct && height > 40;
   return (
     <g>
       <rect x={x} y={y} width={width} height={height} style={{ fill, stroke: "#0a0a08", strokeWidth: 2 }} />
