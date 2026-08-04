@@ -11,6 +11,7 @@ import Calendar from "./Calendar";
 import Competition from "./Competition";
 import Currencies from "./Currencies";
 import News from "./News";
+import KRMarketOverview from "./KRMarketOverview";
 import TickerInput from "./TickerInput";
 
 export default function Terminal({ session }) {
@@ -174,6 +175,7 @@ export default function Terminal({ session }) {
     { id: "competition", label: t("tabCompetition") },
     { id: "currencies", label: t("tabCurrencies") },
     { id: "news", label: t("tabNews") },
+    { id: "kr-market", label: t("tabKRMarket") },
   ];
 
   return (
@@ -319,6 +321,7 @@ export default function Terminal({ session }) {
         )}
         {tab === "currencies" && <Currencies t={t} />}
         {tab === "news" && <News t={t} lang={lang} />}
+        {tab === "kr-market" && <KRMarketOverview t={t} />}
       </div>
 
       {/* status bar */}
