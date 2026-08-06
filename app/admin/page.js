@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireAdmin } from "../../lib/requireAdmin";
 import { supabaseAdmin } from "../../lib/adminSupabase";
-import { createCompetition } from "./actions";
+import { createCompetition, createClubEvent, deleteClubEvent } from "./actions";
 
 const panel = { background: "var(--panel)", border: "1px solid var(--border)", marginBottom: 16 };
 const panelHead = { background: "#1A1204", borderBottom: "1px solid var(--border)", padding: "6px 10px", color: "var(--amber)", fontSize: 11, letterSpacing: 2 };
@@ -24,6 +24,11 @@ export default async function DashboardPage() {
     .from("competitions")
     .select("*")
     .order("start_date", { ascending: false });
+
+  const { data: clubEvents } = await supabaseAdmin
+    .from("club_events")
+    .select("*")
+    .order("event_date", { ascending: false });
 
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: 20 }}>
@@ -85,6 +90,52 @@ export default async function DashboardPage() {
           </div>
           <div style={{ display: "flex", alignItems: "end" }}>
             <button style={btn} type="submit">CREATE</button>
+          </div>
+        </form>
+      </div>
+
+      <div style={panel}>
+        <div style={panelHead}>CLUB EVENTS</div>
+        <div style={panelBody}>
+          {(!clubEvents || clubEvents.length === 0) && (
+            <div style={{ color: "var(--amber-dim)", fontSize: 11, marginBottom: 10 }}>No events yet.</div>
+          )}
+          {clubEvents && clubEvents.length > 0 && (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 4 }}>
+              <tbody>
+                {clubEvents.map((e) => (
+                  <tr key={e.id} style={{ borderBottom: "1px solid #100C06" }}>
+                    <td style={{ padding: "8px 4px", color: "var(--amber-dim)", whiteSpace: "nowrap" }}>{e.event_date}</td>
+                    <td style={{ padding: "8px 4px", color: "var(--white)" }}>{e.title}</td>
+                    <td style={{ padding: "8px 4px", color: "var(--amber-dim)", fontSize: 11 }}>{e.description}</td>
+                    <td style={{ padding: "8px 4px", textAlign: "right" }}>
+                      <form action={deleteClubEvent}>
+                        <input type="hidden" name="id" value={e.id} />
+                        <button type="submit" style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", fontSize: 12 }}>✕</button>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div style={panelHead}>ADD CLUB EVENT</div>
+        <form action={createClubEvent} style={{ padding: 14, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))" }}>
+          <div>
+            <label style={label}>TITLE</label>
+            <input style={inputS} name="title" placeholder="SKK GSB Finance Club — Oct 10 lecturer" required />
+          </div>
+          <div>
+            <label style={label}>DATE</label>
+            <input style={inputS} name="event_date" type="date" required />
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={label}>DESCRIPTION (OPTIONAL)</label>
+            <input style={inputS} name="description" placeholder="Guest lecture on macro trading — Room 302, 6pm" />
+          </div>
+          <div style={{ display: "flex", alignItems: "end" }}>
+            <button style={btn} type="submit">ADD EVENT</button>
           </div>
         </form>
       </div>

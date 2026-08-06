@@ -1,7 +1,78 @@
 "use client";
 import { useState, useEffect } from "react";
-import { C, Label, Val, Panel } from "./ui";
+import { C, Label, Val, Panel, btn } from "./ui";
 import { px, bigNum, daysUntil } from "../lib/format";
+
+// A known Sunday (2023-01-01) — used only to generate locale-correct
+// weekday header labels (Sun..Sat) via toLocaleDateString, not as a real date.
+const REF_SUNDAY = new Date(2023, 0, 1);
+
+function MonthGrid({ events, viewMonth, setViewMonth, t, lang }) {
+  const locale = lang === "ko" ? "ko-KR" : "en-US";
+  const year = viewMonth.getFullYear();
+  const month = viewMonth.getMonth();
+  const startOffset = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const eventsByDate = {};
+  for (const e of events) {
+    (eventsByDate[e.event_date] ||= []).push(e);
+  }
+
+  const cells = [
+    ...Array.from({ length: startOffset }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  const weekdayLabels = Array.from({ length: 7 }, (_, i) =>
+    new Date(REF_SUNDAY.getFullYear(), REF_SUNDAY.getMonth(), REF_SUNDAY.getDate() + i)
+      .toLocaleDateString(locale, { weekday: "short" })
+  );
+
+  return (
+    <Panel title={t("clubEventsTitle")}
+      right={
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <button onClick={() => setViewMonth(new Date(year, month - 1, 1))} style={{ ...btn(false), padding: "2px 8px" }}>‹</button>
+          <span style={{ color: C.white, fontSize: 11, minWidth: 100, textAlign: "center" }}>
+            {viewMonth.toLocaleDateString(locale, { month: "long", year: "numeric" })}
+          </span>
+          <button onClick={() => setViewMonth(new Date(year, month + 1, 1))} style={{ ...btn(false), padding: "2px 8px" }}>›</button>
+        </div>
+      }>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 1, marginBottom: 2 }}>
+        {weekdayLabels.map((w, i) => (
+          <div key={i} style={{ textAlign: "center", color: C.dim, fontSize: 9, padding: "2px 0" }}>{w}</div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} style={{ minHeight: 56 }} />;
+          const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+          const dayEvents = eventsByDate[dateStr] || [];
+          const isToday = dateStr === todayStr;
+          return (
+            <div key={i} style={{
+              minHeight: 56, border: `1px solid ${C.border}`, padding: 3,
+              background: isToday ? "#1A1204" : "transparent",
+            }}>
+              <div style={{ color: isToday ? C.amber : C.dim, fontSize: 10, fontWeight: isToday ? 700 : 400 }}>{d}</div>
+              {dayEvents.map((e) => (
+                <div key={e.id} title={e.description || e.title} style={{
+                  background: "#2A1C06", color: C.amber, fontSize: 9, padding: "1px 3px", marginTop: 2,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", borderLeft: `2px solid ${C.amber}`,
+                }}>
+                  {e.title}
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      {events.length === 0 && <div style={{ color: C.dim, fontSize: 11, marginTop: 8 }}>{t("noClubEvents")}</div>}
+    </Panel>
+  );
+}
 
 export default function Calendar({ symbols, t, lang }) {
   const [events, setEvents] = useState(null);
@@ -9,6 +80,18 @@ export default function Calendar({ symbols, t, lang }) {
   const [econEvents, setEconEvents] = useState(null);
   const [econErr, setEconErr] = useState(null);
   const [econConfigured, setEconConfigured] = useState(true);
+  const [clubEvents, setClubEvents] = useState([]);
+  const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/calendar/events");
+        const d = await r.json();
+        setClubEvents(d.events || []);
+      } catch (_) {}
+    })();
+  }, []);
 
   useEffect(() => {
     if (!symbols.length) { setEvents([]); return; }
@@ -55,6 +138,9 @@ export default function Calendar({ symbols, t, lang }) {
 
   return (
     <div style={{ flex: 1, padding: 6, overflow: "auto", display: "grid", gap: 6, alignContent: "start" }}>
+      {/* Part 0: club events — admin-published, added at /admin */}
+      <MonthGrid events={clubEvents} viewMonth={viewMonth} setViewMonth={setViewMonth} t={t} lang={lang} />
+
       {/* Part 1: general macro calendar — not tied to the watchlist */}
       <Panel title={t("econCalendarTitle")}>
         {!econConfigured && <Val color={C.dim} size={11}>{t("econNotConfigured")}</Val>}

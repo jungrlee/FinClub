@@ -42,3 +42,34 @@ export async function adjustCash(formData) {
 
   revalidatePath(`/admin/competitions/${competitionId}`);
 }
+
+export async function createClubEvent(formData) {
+  await requireAdmin();
+
+  const title = formData.get("title")?.toString().trim();
+  const event_date = formData.get("event_date")?.toString();
+  const description = formData.get("description")?.toString().trim() || null;
+
+  if (!title || !event_date) {
+    throw new Error("title and date are required");
+  }
+
+  const { error } = await supabaseAdmin
+    .from("club_events")
+    .insert({ title, event_date, description });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+}
+
+export async function deleteClubEvent(formData) {
+  await requireAdmin();
+
+  const id = formData.get("id")?.toString();
+  if (!id) throw new Error("missing event id");
+
+  const { error } = await supabaseAdmin.from("club_events").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/admin");
+}
