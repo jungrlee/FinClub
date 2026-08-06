@@ -11,7 +11,7 @@ import Calendar from "./Calendar";
 import Competition from "./Competition";
 import Currencies from "./Currencies";
 import News from "./News";
-import KRMarketOverview from "./KRMarketOverview";
+import MarketOverview from "./MarketOverview";
 import TickerInput from "./TickerInput";
 
 export default function Terminal({ session }) {
@@ -170,12 +170,12 @@ export default function Terminal({ session }) {
 
   const TABS = [
     { id: "terminal", label: t("tabTerminal") },
+    { id: "market", label: t("tabMarket") },
     { id: "portfolio", label: t("tabPortfolio") },
-    { id: "calendar", label: t("tabCalendar") },
-    { id: "competition", label: t("tabCompetition") },
     { id: "currencies", label: t("tabCurrencies") },
+    { id: "calendar", label: t("tabCalendar") },
     { id: "news", label: t("tabNews") },
-    { id: "kr-market", label: t("tabKRMarket") },
+    { id: "competition", label: t("tabCompetition") },
   ];
 
   return (
@@ -310,18 +310,18 @@ export default function Terminal({ session }) {
           <StockDetail data={selData} live={selLive} pred={selPred} predErr={selPredErr}
             loading={stage} onRefresh={() => selected && fetchStock(selected, true)} t={t} lang={lang} />
         )}
+        {tab === "market" && <MarketOverview t={t} />}
         {tab === "portfolio" && (
           <Portfolio user={user} t={t} liveQuotes={liveQuotes} onSymbolsChange={setPortfolioSymbols} />
         )}
+        {tab === "currencies" && <Currencies t={t} />}
         {tab === "calendar" && (
           <Calendar symbols={watchlist.map((w) => w.symbol).filter(Boolean)} t={t} lang={lang} />
         )}
+        {tab === "news" && <News t={t} lang={lang} />}
         {tab === "competition" && (
           <Competition user={user} session={session} t={t} liveQuotes={liveQuotes} onSymbolsChange={setCompetitionSymbols} />
         )}
-        {tab === "currencies" && <Currencies t={t} />}
-        {tab === "news" && <News t={t} lang={lang} />}
-        {tab === "kr-market" && <KRMarketOverview t={t} />}
       </div>
 
       {/* status bar */}
