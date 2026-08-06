@@ -4,10 +4,16 @@
 // (US has no free per-index breadth/trading-value/investor-flow source —
 // breadth is a single market-wide figure derived from the curated ranking
 // constituents, not one number per ETF proxy, hence the different shape.)
+//
+// US index/chart values come from Yahoo (^GSPC/^IXIC/^DJI), not the SPY/
+// QQQ/DIA ETF quotes — an ETF trades at roughly 1/10th the real index level
+// (SPY ~$770 vs S&P 500 ~7,700), so showing the ETF price as "S&P 500"
+// was wrong, not just approximate. The SPY/QQQ/DIA *keys* are kept (they
+// label which index each card is) but the numbers are the real index.
 import { NextResponse } from "next/server";
 import { getMarketIndex, getMarketChart, getMarketPulse } from "../../../../lib/providers/naverMarket";
-import { getUSIndices, getUSRanking, US_INDEX_PROXIES } from "../../../../lib/providers/finnhub";
-import { getChart } from "../../../../lib/providers";
+import { getUSRanking } from "../../../../lib/providers/finnhub";
+import { getUSIndexQuotes, getUSIndexChart } from "../../../../lib/providers/yahooEnrich";
 import { US_TICKERS } from "../../../../lib/providers/usTickers";
 
 export const runtime = "nodejs";
@@ -28,18 +34,17 @@ async function loadKR() {
 }
 
 async function loadUS() {
-  const symbols = Object.keys(US_INDEX_PROXIES);
+  const symbols = ["SPY", "QQQ", "DIA"];
   const [quotes, ranking, ...charts] = await Promise.all([
-    getUSIndices(),
+    getUSIndexQuotes(),
     getUSRanking(US_TICKERS),
-    ...symbols.map((s) => getChart(s, "US", "6M")),
+    ...symbols.map((s) => getUSIndexChart(s, 300)),
   ]);
   const out = {};
   symbols.forEach((s, i) => {
-    const q = quotes[s];
     out[s] = {
-      index: q ? { price: q.price, change: q.change, changePct: q.changePct, up: (q.changePct ?? 0) >= 0 } : null,
-      chart: (charts[i] || []).map((c) => ({ date: c.d, close: c.c })),
+      index: quotes[s] || null,
+      chart: (charts[i] || []).map((c) => ({ date: c.date, close: c.close })),
     };
   });
   const up = ranking.filter((r) => (r.changePct ?? 0) > 0).length;
